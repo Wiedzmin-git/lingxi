@@ -106,7 +106,9 @@ export const Plugin = {
                   return Effect.succeed({
                     output,
                     content: toModelContent(input.questions, output.answers),
-                    metadata: { answers: output.answers },
+                    // These are user-authored instructions, not generated tool output.
+                    // Preserve the complete reply just as we preserve a user prompt.
+                    metadata: { answers: output.answers, truncated: false },
                   })
                 }),
               ),

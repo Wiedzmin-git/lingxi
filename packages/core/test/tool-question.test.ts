@@ -7,18 +7,22 @@ import { Permission } from "@opencode/core/permission"
 import { Session } from "@opencode/core/session"
 import { Tool } from "@opencode/core/tool"
 import { QuestionTool } from "@opencode/core/tool/plugin/question"
+import { ToolOutput } from "@opencode/core/tool-output"
+import { Global } from "@opencode/util/global"
 import { Image } from "@opencode/core/image"
 import { testEffect } from "./lib/effect"
 import { imagePassthrough } from "./lib/image"
 import { permissionLayer } from "./lib/permission"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { toolIdentity, executeTool, registerToolPlugin, toolDefinitions } from "./lib/tool"
+import { tmpdir } from "./fixture/tmpdir"
 
 const sessionID = Session.ID.make("ses_question_tool_test")
 const assertions: Permission.AssertInput[] = []
 let captured: Form.CreateInput | undefined
 let reject = false
 let deny = false
+let answer: Form.Answer = { q0: "Build", q1: ["Dev"] }
 const capturedInput = () => captured
 const questionInput = {
   questions: [
@@ -53,7 +57,7 @@ const form = Layer.mock(Form.Service, {
       Effect.andThen(
         Effect.sync(
           (): Form.TerminalState =>
-            reject ? { status: "cancelled" } : { status: "answered", answer: { q0: "Build", q1: ["Dev"] } },
+            reject ? { status: "cancelled" } : { status: "answered", answer },
         ),
       ),
     ),
@@ -73,6 +77,38 @@ const it = testEffect(
 )
 
 describe("QuestionTool", () => {
+  it.effect("preserves long user answers through model-output bounding", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const previous = answer
+          yield* Effect.addFinalizer(() => Effect.sync(() => (answer = previous)))
+          const text = `BEGIN_${"длинный ответ 靈犀\n".repeat(6_000)}_END`
+          answer = { q0: text }
+          const registry = yield* Tool.Service
+          const output = yield* ToolOutput.Service
+          const tools = yield* registry.snapshot()
+          const result = yield* tools.execute({
+            sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: "call-question-long", name: "question", input: questionInput },
+          })
+          const bounded = yield* output.truncate(result)
+          expect(bounded.content).toEqual([
+            {
+              type: "text",
+              text: `User has answered your questions: "Continue?"="${text}". You can now continue with the user's answers in mind.`,
+            },
+          ])
+          expect(bounded.metadata?.truncated).toBe(false)
+        }).pipe(
+          Effect.provide(AppNodeBuilder.build(ToolOutput.node, [Global.node.replace(Global.layerWith({ data: tmp.path }))])),
+        ),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.effect("emits one item schema for the nonempty questions array", () =>
     Effect.gen(function* () {
       captured = undefined
@@ -172,7 +208,7 @@ describe("QuestionTool", () => {
             text: 'User has answered your questions: "What should happen?"="Build", "Which environment?"="Dev", "Anything else?"="Unanswered". You can now continue with the user\'s answers in mind.',
           },
         ],
-        metadata: { answers: [["Build"], ["Dev"], []] },
+        metadata: { answers: [["Build"], ["Dev"], []], truncated: false },
       })
       expect(assertions).toMatchObject([{ sessionID, action: "question", resources: ["*"] }])
       expect(capturedInput()).toEqual({
