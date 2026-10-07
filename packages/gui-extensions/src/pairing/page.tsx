@@ -89,7 +89,7 @@ function SettingsPairing(props: { client: Client }) {
               </Button>
             </Row>
             <div data-action="settings-keep-screen-active">
-              <Row title={ctx.t("screenActive.title")} description={ctx.t("screenActive.description")}>
+              <Row title={ctx.t("screenActive.title")} description={ctx.t("screenActive.lingxiDescription")}>
                 <Switch
                   hideLabel
                   checked={screenActive.isSuccess && screenActive.data}

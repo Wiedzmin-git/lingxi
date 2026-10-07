@@ -1,4 +1,6 @@
 export default {
+  "lingxi.updates": "Lingxi updates are managed by the independent launcher. Use the installed Stage updates shortcut, then close and reopen Lingxi when convenient.",
+  "lingxi.instructions": "Lingxi update instructions",
   "status.label": "Update",
   "action.checkNow": "Check now",
   "action.checking": "Checking…",

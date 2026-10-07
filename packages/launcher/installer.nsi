@@ -23,6 +23,9 @@ SetCompressor /SOLID lzma
 ShowInstDetails show
 Var Portable
 
+!define MUI_ICON "${__FILEDIR__}\..\desktop\icons\lingxi\icon.ico"
+!define MUI_UNICON "${__FILEDIR__}\..\desktop\icons\lingxi\icon.ico"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PAYLOAD}\LICENSE.txt"
 !insertmacro MUI_PAGE_DIRECTORY
@@ -65,6 +68,7 @@ launcherInstalled:
   File "${PAYLOAD}\DOTNET-LICENSE.txt"
   File "${PAYLOAD}\DOTNET-NOTICES.txt"
   File "${PAYLOAD}\README.txt"
+  File /oname=Lingxi.ico "${__FILEDIR__}\..\desktop\icons\lingxi\icon.ico"
   IfFileExists "$INSTDIR\installation\installation.json" stage 0
   nsExec::ExecToLog '"$PLUGINSDIR\Lingxi.Setup.exe" initialize-new "$INSTDIR\installation" "$INSTDIR\profile" dev'
   Pop $0
@@ -81,10 +85,11 @@ installed:
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   StrCmp $Portable "1" complete
   CreateDirectory "$SMPROGRAMS\Lingxi"
-  CreateShortcut "$SMPROGRAMS\Lingxi\Lingxi.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'launch "$INSTDIR\installation"'
-  CreateShortcut "$SMPROGRAMS\Lingxi\Stage updates.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'stage "$INSTDIR\installation"'
-  CreateShortcut "$SMPROGRAMS\Lingxi\Release credential.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'credential'
+  CreateShortcut "$SMPROGRAMS\Lingxi\Lingxi.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'launch "$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
+  CreateShortcut "$SMPROGRAMS\Lingxi\Stage updates.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'stage "$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
+  CreateShortcut "$SMPROGRAMS\Lingxi\Release credential.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'credential' "$INSTDIR\Lingxi.ico"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "DisplayName" "Lingxi · 靈犀"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "DisplayIcon" "$INSTDIR\Lingxi.ico"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "NoModify" 1
@@ -108,6 +113,7 @@ Section "Uninstall"
   RMDir "$SMPROGRAMS\Lingxi"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi"
 local:
+  Delete "$INSTDIR\Lingxi.ico"
   Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\DOTNET-LICENSE.txt"
   Delete "$INSTDIR\DOTNET-NOTICES.txt"

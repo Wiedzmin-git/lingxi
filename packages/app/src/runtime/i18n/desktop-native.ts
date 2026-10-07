@@ -1,3 +1,5 @@
+import { brandedMessage } from "./branding"
+
 export const DESKTOP_NATIVE_LOCALES = [
   "en",
   "zh",
@@ -201,14 +203,20 @@ export const DESKTOP_NATIVE_LOCALE_TAGS: Record<DesktopNativeLocale, string> = {
 export function detectDesktopNativeLocale(languages: readonly string[]): DesktopNativeLocale {
   for (const language of languages) {
     const source = locale(language)
+
     if (!source) continue
+
     if (["no", "nb", "nn"].includes(source.language)) return "no"
+
     const match = DESKTOP_NATIVE_LOCALES.find((candidate) => {
       const target = locale(DESKTOP_NATIVE_LOCALE_TAGS[candidate])
+
       return target?.language === source.language && normalizeScript(target.script) === normalizeScript(source.script)
     })
+
     if (match) return match
   }
+
   return "en"
 }
 
@@ -228,7 +236,7 @@ function locale(value: string) {
 const normalizeScript = (script?: string) => (script === "Aran" ? "Arab" : script)
 
 export const DESKTOP_NATIVE_ENGLISH = {
-  "desktop.menu.app": "OpenCode",
+  "desktop.menu.app": "Lingxi · 靈犀",
   "desktop.menu.file": "File",
   "desktop.menu.edit": "Edit",
   "desktop.menu.view": "View",
@@ -268,11 +276,11 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.menu.nextProject": "Next Project",
   "desktop.menu.minimize": "Minimize",
   "desktop.menu.maximize": "Maximize",
-  "desktop.menu.documentation": "OpenCode Documentation",
+  "desktop.menu.documentation": "Lingxi Documentation",
   "desktop.menu.supportForum": "Support Forum",
   "desktop.menu.shareFeedback": "Share Feedback",
   "desktop.menu.reportBug": "Report a Bug",
-  "desktop.menu.ariaLabel": "OpenCode menu",
+  "desktop.menu.ariaLabel": "Lingxi menu",
 
   "desktop.cli.installed.title": "CLI Installed",
   "desktop.cli.installed.message": "CLI installed to {{path}}\n\nRestart your terminal to use the 'opencode' command.",
@@ -283,9 +291,9 @@ export const DESKTOP_NATIVE_ENGLISH = {
   "desktop.recovery.action.exportLogs": "Export Logs",
   "desktop.recovery.action.keepWaiting": "Keep Waiting",
   "desktop.recovery.action.quit": "Quit",
-  "desktop.recovery.loadFailed": "OpenCode failed to load",
-  "desktop.recovery.terminated": "OpenCode window terminated unexpectedly",
-  "desktop.recovery.unresponsive": "OpenCode is not responding",
+  "desktop.recovery.loadFailed": "Lingxi failed to load",
+  "desktop.recovery.terminated": "Lingxi window terminated unexpectedly",
+  "desktop.recovery.unresponsive": "Lingxi is not responding",
   "desktop.recovery.unresponsive.detail": "You can relaunch the app, open the logs, or keep waiting.",
   "desktop.recovery.loadFailed.detail": "Window: {{window}}\nURL: {{url}}\nError: {{code}} {{description}}",
   "desktop.recovery.terminated.detail": "Window: {{window}}\nReason: {{reason}}\nCode: {{code}}",
@@ -303,10 +311,14 @@ export const DESKTOP_NATIVE_ENGLISH = {
 } as const
 
 export type DesktopNativeKey = keyof typeof DESKTOP_NATIVE_ENGLISH
+
 export type DesktopNativeMessages = Record<DesktopNativeKey, string>
+
 export type DesktopNativeBundle = { locale: DesktopNativeLocale; messages: DesktopNativeMessages }
 
+// SAFETY: these keys are enumerated directly from the closed English source object.
 export const DESKTOP_NATIVE_KEYS = Object.keys(DESKTOP_NATIVE_ENGLISH) as DesktopNativeKey[]
+
 export const DESKTOP_NATIVE_MAX_PAYLOAD_BYTES = 64 * 1024
 
 export function createDesktopNativeBundle(
@@ -315,32 +327,47 @@ export function createDesktopNativeBundle(
 ): DesktopNativeBundle {
   return {
     locale,
-    messages: Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key) => [key, translate(key)])) as DesktopNativeMessages,
+    // SAFETY: every native key is emitted exactly once with a string returned by translate.
+    messages: Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key) => [key, brandedMessage(key, translate(key))])) as DesktopNativeMessages,
   }
 }
 
+// SAFETY: this is the native IPC parser boundary itself. It checks payload size, locale,
+// exact message keys and every string value before returning the typed bundle.
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion */
 export function parseDesktopNativeBundle(value: unknown): DesktopNativeBundle | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+
   try {
     if (new TextEncoder().encode(JSON.stringify(value)).byteLength > DESKTOP_NATIVE_MAX_PAYLOAD_BYTES) return undefined
   } catch {
     return undefined
   }
+
   const bundle = value as { locale?: unknown; messages?: unknown }
+
   if (!DESKTOP_NATIVE_LOCALES.some((locale) => locale === bundle.locale)) return undefined
+
   if (!bundle.messages || typeof bundle.messages !== "object" || Array.isArray(bundle.messages)) return undefined
   const messages = bundle.messages as Record<string, unknown>
   const keys = Object.keys(messages)
+
   if (keys.length !== DESKTOP_NATIVE_KEYS.length) return undefined
+
   if (!DESKTOP_NATIVE_KEYS.every((key) => typeof messages[key] === "string")) return undefined
+
   if (!keys.every((key) => key in DESKTOP_NATIVE_ENGLISH)) return undefined
+
   return bundle as DesktopNativeBundle
 }
+/* oxlint-enable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion */
 
 export function formatDesktopNativeMessage(message: string, params?: Record<string, string | number>) {
   if (!params) return message
+
   return message.replace(/\{\{([^{}]+)\}\}/g, (match, key: string) => {
     const value = params[key]
+
     return value === undefined ? match : String(value)
   })
 }

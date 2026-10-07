@@ -1,4 +1,7 @@
 export default {
+  "lingxi.wslNotInstalled": "WSL (Windows Subsystem for Linux) is required before Lingxi can add a WSL server.",
+  "lingxi.wslUnavailable": "Lingxi could not verify WSL on this machine.",
+  "lingxi.windowsRestartRequired": "Restart Windows to finish installing WSL, then reopen Lingxi.",
   "server.add": "Add WSL server",
   "server.label": "WSL",
   "server.menu.label": "WSL server",

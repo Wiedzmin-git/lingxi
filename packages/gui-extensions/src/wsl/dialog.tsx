@@ -413,11 +413,11 @@ function DialogWslSetup(props: {
         : language.t("onboarding.wslUnavailable.title")
 
   const description = () => {
-    if (props.state === "pendingRestart") return language.t("onboarding.windowsRestartRequired")
+    if (props.state === "pendingRestart") return language.t("lingxi.windowsRestartRequired")
 
-    if (!props.installable) return language.t("onboarding.wslUnavailable.description")
+    if (!props.installable) return language.t("lingxi.wslUnavailable")
 
-    return language.t("onboarding.wslNotInstalled.description")
+    return language.t("lingxi.wslNotInstalled")
   }
 
   return (

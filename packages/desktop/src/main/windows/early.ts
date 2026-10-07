@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { app, BrowserWindow, screen, shell } from "electron"
+import { app, BrowserWindow, screen, shell, type BrowserWindowConstructorOptions } from "electron"
 import { resolveExternalURL } from "../files/external-url"
 import { windowArguments } from "./bootstrap"
 import { WINDOW_IDS_KEY } from "../storage/keys"
@@ -10,6 +10,7 @@ import { storedBackgroundColor, titlebarOverlay } from "./defaults"
 import { registerRendererProtocol } from "./protocol"
 import { loadWindow } from "./scheme"
 import { allowRendererPermissions, wireNavigationPolicy, wireRendererHeaders } from "./security"
+import { APP_NAME } from "../constants"
 import {
   manageWindowState,
   readWindowState,
@@ -41,27 +42,24 @@ const displays = {
 // bundle, the layers and the renderer boot. restoreWindows() adopts it through takeEarlyWindow().
 export function createEarlyWindow() {
   const ids = getStore().get(WINDOW_IDS_KEY)
+  // SAFETY: electron-store is an untyped persistence boundary; only a string may become a window ID.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
   const id = Array.isArray(ids) && typeof ids[0] === "string" ? ids[0] : randomUUID()
   const root = path.dirname(fileURLToPath(import.meta.url))
   const file = path.join(app.getPath("userData"), windowStateFile(id))
   const state = resolveWindowState(readWindowState(file), { width: 1280, height: 800 }, displays)
   const icons = app.isPackaged ? path.join(process.resourcesPath, "icons") : path.join(root, "../../resources/icons")
-  const win = new BrowserWindow({
+
+  const options: BrowserWindowConstructorOptions = {
     x: state.x,
     y: state.y,
     width: state.width,
     height: state.height,
     show: !app.commandLine.hasSwitch("start-hidden"),
     autoHideMenuBar: true,
-    title: "OpenCode",
+    title: APP_NAME,
     icon: path.join(icons, `icon.${process.platform === "win32" ? "ico" : "png"}`),
     backgroundColor: storedBackgroundColor(),
-    ...(process.platform === "darwin"
-      ? { titleBarStyle: "hidden" as const, trafficLightPosition: { x: 14, y: 14 } }
-      : {}),
-    ...(process.platform === "win32"
-      ? { frame: false, titleBarStyle: "hidden" as const, titleBarOverlay: titlebarOverlay() }
-      : {}),
     webPreferences: {
       preload: path.join(root, "../preload/index.cjs"),
       contextIsolation: true,
@@ -69,7 +67,21 @@ export function createEarlyWindow() {
       sandbox: true,
       additionalArguments: windowArguments(id),
     },
-  })
+  }
+
+  if (process.platform === "darwin") {
+    options.titleBarStyle = "hidden"
+    options.trafficLightPosition = { x: 14, y: 14 }
+  }
+
+  if (process.platform === "win32") {
+    options.frame = false
+    options.titleBarStyle = "hidden"
+    options.titleBarOverlay = titlebarOverlay()
+  }
+
+  const win = new BrowserWindow(options)
+
   manageWindowState(win, file, state, displays)
   // Closing the only window before the rest of the app has adopted it is a quit.
   win.once("closed", () => {
@@ -77,6 +89,7 @@ export function createEarlyWindow() {
     pending = undefined
     app.quit()
   })
+
   const record: EarlyWindow = {
     id,
     win,
@@ -84,9 +97,11 @@ export function createEarlyWindow() {
     shownAt: app.commandLine.hasSwitch("start-hidden") ? undefined : Date.now(),
     openExternal: (url) => {
       const target = resolveExternalURL(url)
+
       if (target) void shell.openExternal(target)
     },
   }
+
   pending = record
   // The renderer boots while the main bundle and layers load, instead of after them. Everything the
   // page needs before its first request is wired here; the IPC port arrives once the layers are up.
@@ -100,5 +115,6 @@ export function createEarlyWindow() {
 export function takeEarlyWindow() {
   const taken = pending
   pending = undefined
+
   return taken
 }

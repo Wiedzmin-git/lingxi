@@ -273,7 +273,7 @@ export const defaultSettings: Settings = {
     terminalPlacement: "side",
     followUpBehavior: "steer",
   },
-  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "horizontal", messageTimestamps: true },
+  appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "vertical", messageTimestamps: true },
   keybinds: {},
   permissions: { autoApprove: false },
   workspaces: { defaultDestination: "last-used", lastUsed: {} },

@@ -380,7 +380,18 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
               )
             }}
           </Show>
-          <Show when={updater()}>
+          <Show when={platform.version?.includes("-lingxi.")}>
+            <Button
+              size="large"
+              variant="ghost"
+              onClick={() =>
+                platform.openExternal("https://github.com/Wiedzmin-git/lingxi/blob/dev/docs/lingxi-help.md#updates")
+              }
+            >
+              {language.t("error.page.action.lingxiUpdates")}
+            </Button>
+          </Show>
+          <Show when={!platform.version?.includes("-lingxi.") && updater()}>
             <Show
               when={updateVersion()}
               fallback={
@@ -413,10 +424,10 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
+              onClick={() => platform.openExternal("https://github.com/Wiedzmin-git/lingxi/issues")}
             >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
+              <div>{language.t("error.page.report.lingxiIssues")}</div>
+              <Icon name="github" class="text-text-interactive-base" />
             </button>
           </div>
           <Show when={platform.version}>

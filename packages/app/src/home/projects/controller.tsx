@@ -34,11 +34,13 @@ export function createHomeProjectsController(home: HomeController) {
   const authenticate = ServerConnection.authenticate
   const revealProject = useRevealProject()
   const [_state, setState, _, ready] = persisted(Persist.global("home.servers"), HomeServersSchema, { collapsed: {} })
+
   const [state] = createResource(
     () => ready.promise ?? Promise.resolve(),
     (promise) => promise.then(() => _state),
     { initialValue: _state },
   )
+
   function directories(project: LocalProject) {
     return [project.worktree, ...(project.sandboxes ?? [])]
   }
@@ -114,11 +116,15 @@ export function createHomeProjectsController(home: HomeController) {
               const data = await Schema.decodeUnknownPromise(Schema.fromJsonString(SessionTransfer.Data))(
                 await file.text(),
               )
+
               const api = home.server.context(conn).sdk.api.session
+
+              // SAFETY: SessionTransfer.Data decoded the file and encodes the same import wire payload; location is supplied explicitly.
               const imported = await api.import({
                 ...Schema.encodeSync(SessionTransfer.Data)(data),
                 location: { directory: project.worktree },
               } as Parameters<typeof api.import>[0])
+
               home.project.openProjectSession(conn, project.worktree, imported)
             },
           )
@@ -137,6 +143,7 @@ export function createHomeProjectsController(home: HomeController) {
       },
       unseenCount: (conn: ServerConnection.Any, project: LocalProject) => {
         const notification = global.ensureServerCtx(conn).notification
+
         return directories(project).reduce((total, directory) => total + notification.project.unseenCount(directory), 0)
       },
       clearNotifications: (conn: ServerConnection.Any, project: LocalProject) => {
@@ -147,6 +154,7 @@ export function createHomeProjectsController(home: HomeController) {
       },
       choose: (conn: ServerConnection.Any) => {
         if (authenticate(conn, () => choose(conn))) return
+
         if (home.server.health(conn)?.healthy === false) return
         choose(conn)
       },
@@ -157,6 +165,7 @@ export function createHomeProjectsController(home: HomeController) {
           home.server.context(conn).projects,
           directory,
         )
+
         if (next) home.selection.set(next)
       },
       move: (conn: ServerConnection.Any, worktree: string, index: number) => {
@@ -167,7 +176,7 @@ export function createHomeProjectsController(home: HomeController) {
     },
     utility: {
       settings: openSettings,
-      help: () => platform.openExternal("https://opencode.ai/desktop-feedback"),
+      help: () => platform.openExternal("https://github.com/Wiedzmin-git/lingxi#readme"),
     },
   }
 }

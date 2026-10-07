@@ -36,6 +36,7 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   const initialUrl = getLastActiveUrl(windowState.id)
   const url = new URL(initialUrl, "http://localhost")
   const route = currentRoute(url.pathname, url.search)
+
   const [startup, setStartup] = createStore({
     ready: false,
     launcherReady: false,
@@ -45,26 +46,35 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
     drawingReady: false,
     route,
   })
+
   // The window was created with the answers the shell gate needs; only a fresh install, which has no
   // onboarding decision yet, asks over IPC and waits for the port.
   const bootstrap = props.api.getWindowBootstrap()
+
   const [firstLaunch] = createResource(() =>
     bootstrap.firstLaunchPending !== undefined
       ? Promise.resolve(bootstrap.firstLaunchPending)
       : props.api.isFirstLaunchOnboardingPending(),
   )
+
   const platform = createDesktopPlatform(props.api, windowState)
   const [sidecar, { mutate: setSidecar }] = createResource(() => props.api.awaitInitialization())
+
   const [defaultServer] = createResource(async () => {
     if (bootstrap.defaultServerUrl === undefined) return platform.getDefaultServer?.()
+
     return bootstrap.defaultServerUrl ? ServerConnection.Key.make(bootstrap.defaultServerUrl) : null
   })
+
   const [locale] = createResource(() => preloadStoredLocale(platform))
+
   const [initialRoute] = createResource(
     () => !firstLaunch.loading && (firstLaunch() && initialUrl === "/" ? "/new-session" : initialUrl),
     preloadRoute,
   )
+
   const router = (routerProps: BaseRouterProps) => <DesktopMemoryRouter {...routerProps} windowID={windowState.id} />
+
   const readyToReveal = () =>
     startup.ready &&
     startup.launcherReady &&
@@ -79,12 +89,15 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   function ReadyApp() {
     const extensions = useExtensionServers()
     const language = useLanguage()
+
     const ready = createMemo(
       () => !firstLaunch.loading && !defaultServer.loading && !sidecar.loading && !locale.loading && extensions.ready(),
     )
+
     const servers = createMemo(() => {
       const data = initializationData(sidecar)
       const list: ServerConnection.Any[] = []
+
       if (data) {
         list.push({
           displayName: language.t("desktop.server.local"),
@@ -94,18 +107,23 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
           reconnect: createSidecarResolver({ api: props.api, current: sidecar, update: setSidecar }),
         })
       }
+
       list.push(...extensions.list())
+
       return list
     })
+
     // Resolved once, when the window first becomes ready, so the app's lifetime never follows live server
     // availability: an extension reloading its server would otherwise remount the whole app. A default that
     // disappears later reads like any unavailable server.
     const startupServer = createMemo<ServerConnection.Key | undefined>((resolved) => {
       if (resolved || !ready()) return resolved
       const key = defaultServer.latest ?? "sidecar"
+
       // An extension's server that is not listed yet (e.g. a WSL distro still starting) cannot open the window.
       if (key === "sidecar" || /^https?:\/\//.test(key) || extensions.list().some((conn) => conn.key === key))
         return ServerConnection.Key.make(key)
+
       return ServerConnection.Key.make("sidecar")
     })
 
@@ -113,7 +131,7 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
       <Show when={ready()}>
         <Show when={startupServer()} keyed>
           {(key) => (
-            <div class="size-full" inert={!startup.launcherReady}>
+            <div class="flex size-full min-h-0 min-w-0 flex-col" inert={!startup.launcherReady}>
               <AppInterface defaultServer={key} servers={servers()} router={router}>
                 <DesktopStartupReady
                   routeReady={!initialRoute.loading && !initialRoute.error && !locale.error && startup.onboardingReady}
@@ -199,6 +217,7 @@ function DesktopStartupReady(props: {
   createEffect(() => {
     if (!props.routeReady || !props.themeReady || !tabs.ready() || !tabs.infoReady()) return
     let disposed = false
+
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         void props
@@ -209,11 +228,13 @@ function DesktopStartupReady(props: {
           .catch((error) => console.error("[launcher-readiness]", error))
       })
     })
+
     onCleanup(() => {
       disposed = true
       cancelAnimationFrame(frame)
     })
   })
+
   return null
 }
 
@@ -224,9 +245,11 @@ function DesktopEffects(props: { api: ElectronAPI; interactive: boolean }) {
 
   createEffect(() => {
     if (!props.interactive) return
+
     const frame = requestAnimationFrame(() => {
       if (document.activeElement === document.body) command.trigger("input.focus")
     })
+
     onCleanup(() => cancelAnimationFrame(frame))
   })
 
@@ -234,6 +257,7 @@ function DesktopEffects(props: { api: ElectronAPI; interactive: boolean }) {
     theme.themeId()
     theme.mode()
     const background = getComputedStyle(document.documentElement).getPropertyValue("--background-base").trim()
+
     if (background) void props.api.setBackgroundColor(background)
   })
 

@@ -273,19 +273,13 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     labelKey: "desktop.menu.help",
     items: [
-      { type: "item", labelKey: "desktop.menu.documentation", href: "https://opencode.ai/docs" },
-      { type: "item", labelKey: "desktop.menu.supportForum", href: "https://discord.com/invite/opencode" },
+      { type: "item", labelKey: "desktop.menu.documentation", href: "https://github.com/Wiedzmin-git/lingxi#readme" },
       { type: "item", labelKey: "desktop.menu.exportLogs", command: "logs.export" },
       { type: "separator" },
       {
         type: "item",
-        labelKey: "desktop.menu.shareFeedback",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=feature_request.yml",
-      },
-      {
-        type: "item",
         labelKey: "desktop.menu.reportBug",
-        href: "https://github.com/anomalyco/opencode/issues/new?template=bug_report.yml",
+        href: "https://github.com/Wiedzmin-git/lingxi/issues",
       },
     ],
   },
@@ -298,6 +292,7 @@ export function desktopMenuVisible(item: { platforms?: DesktopMenuPlatform[] }, 
 /** What a GUI extension's menubar item names in `after`: a built-in item's command, action, or role. */
 export function desktopMenuKey(entry: DesktopMenuEntry) {
   if (entry.type === "separator") return undefined
+
   return entry.command ?? entry.action ?? entry.role
 }
 
@@ -306,10 +301,13 @@ export function desktopMenuWithExtensions<Entry, Extra extends { readonly id: st
   base: readonly { readonly key?: string; readonly entry: Entry }[],
   extra: readonly Extra[],
 ) {
-  return extra.reduce<readonly { readonly key?: string; readonly entry: Entry | Extra }[]>((list, item) => {
+  const list: { readonly key?: string; readonly entry: Entry | Extra }[] = [...base]
+  extra.forEach((item) => {
     const next = { key: item.id, entry: item }
     const index = item.after ? list.findIndex((entry) => entry.key === item.after) : -1
-    if (index < 0) return [...list, next]
-    return [...list.slice(0, index + 1), next, ...list.slice(index + 1)]
-  }, base)
+
+    list.splice(index < 0 ? list.length : index + 1, 0, next)
+  })
+
+  return list
 }

@@ -5,6 +5,27 @@ import { updaterAction } from "./action"
 import type definition from "./index"
 
 const setup: Setup<typeof definition> = (ctx) => {
+  if (ctx.build.version?.includes("-lingxi.")) {
+    ctx.add(SettingsPage, {
+      id: "updates",
+      page: "general",
+      available: "desktop",
+      get title() {
+        return ctx.t("section.title")
+      },
+      render: () => (
+        <div class="p-4 text-13-regular">
+          <p>{ctx.t("lingxi.updates")}</p>
+          <a href="https://github.com/Wiedzmin-git/lingxi/blob/dev/docs/lingxi-help.md#updates" target="_blank" rel="noreferrer">
+            {ctx.t("lingxi.instructions")}
+          </a>
+        </div>
+      ),
+    })
+
+    return
+  }
+
   whatsNew(ctx)
 
   if (!ctx.desktop) return

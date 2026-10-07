@@ -14,6 +14,117 @@ const session = (viewed: number): SessionInfo => ({
   location: { directory: "/project" },
 })
 
+test.each(["created", "cancelled", "cancelled-before-cache"] as const)(
+  "form %s events win over an older initial form snapshot",
+  async (action) => {
+    const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+    const pending = Promise.withResolvers<Response>()
+    const started = Promise.withResolvers<void>()
+    const api = OpenCode.make({
+      baseUrl: "http://opencode.local",
+      fetch: async () => {
+        started.resolve()
+        return pending.promise
+      },
+    })
+    const setup = createRoot((dispose) => ({
+      data: createData({
+        api: () => api,
+        directory: "/project",
+        event: {
+          on: () => () => {},
+          listen(handler) {
+            listeners.add(handler)
+            return () => listeners.delete(handler)
+          },
+        },
+      }),
+      dispose,
+    }))
+    try {
+      const load = setup.data.session.form.sync("ses_refresh")
+      await started.promise
+      const event: OpenCodeEvent = {
+        id: "evt_form",
+        created: 1,
+        type: "form.created",
+        location: { directory: "/project" },
+        data: { form: { id: "frm_question", sessionID: "ses_refresh", title: "Question", fields: [] } },
+      }
+    if (action !== "cancelled-before-cache") {
+      listeners.forEach((listener) => listener({ name: event.type, details: event }))
+      expect(setup.data.session.form.list("ses_refresh")?.map((form) => form.id)).toEqual(["frm_question"])
+    }
+    if (action !== "created") {
+        const settled: OpenCodeEvent = {
+          id: "evt_settled",
+          created: 2,
+          type: "form.cancelled",
+          location: { directory: "/project" },
+          data: { id: "frm_question", sessionID: "ses_refresh" },
+        }
+        listeners.forEach((listener) => listener({ name: settled.type, details: settled }))
+      }
+    pending.resolve(Response.json({ data: action !== "created" ? [event.data.form] : [] }))
+      await load
+      expect(setup.data.session.form.list("ses_refresh")?.map((form) => form.id)).toEqual(
+        action === "created" ? ["frm_question"] : [],
+      )
+    } finally {
+      setup.dispose()
+    }
+  },
+)
+
+test("global form snapshots reconcile events independently by location", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const a = Promise.withResolvers<Response>()
+  const b = Promise.withResolvers<Response>()
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      return request.url.includes(encodeURIComponent("/a")) ? a.promise : b.promise
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/a",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+  try {
+    const loadA = setup.data.session.form.sync("global", { directory: "/a" })
+    const loadB = setup.data.session.form.sync("global", { directory: "/b" })
+    const created: OpenCodeEvent = {
+      id: "evt_a", created: 1, type: "form.created", location: { directory: "/a" },
+      data: { form: { id: "frm_shared", sessionID: "global", title: "A", fields: [] } },
+    }
+    const cancelled: OpenCodeEvent = {
+      id: "evt_b", created: 2, type: "form.cancelled", location: { directory: "/b" },
+      data: { id: "frm_shared", sessionID: "global" },
+    }
+    listeners.forEach((listener) => listener({ name: created.type, details: created }))
+    listeners.forEach((listener) => listener({ name: cancelled.type, details: cancelled }))
+    b.resolve(Response.json({ location: { directory: "/b" }, data: [{ ...created.data.form, title: "B" }] }))
+    await loadB
+    a.resolve(Response.json({ location: { directory: "/a" }, data: [] }))
+    await loadA
+    expect(setup.data.session.form.list("global", { directory: "/a" })?.map((form) => form.title)).toEqual(["A"])
+    expect(setup.data.session.form.list("global", { directory: "/b" })).toEqual([])
+  } finally {
+    setup.dispose()
+  }
+})
+
 test("uses the configured initial window and retains normal cursor page sizes", async () => {
   const requests: { limit: string | null; cursor: string | null }[] = []
   const api = OpenCode.make({

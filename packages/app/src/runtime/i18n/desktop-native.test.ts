@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { brandedDictionary } from "./branding"
 import {
   createDesktopNativeBundle,
   DESKTOP_NATIVE_ENGLISH,
@@ -12,6 +13,23 @@ import {
 } from "./desktop-native"
 
 describe("desktop native translations", () => {
+  test("brands inherited app copy before interpolation while preserving providers and attribution", () => {
+    const source = {
+      "desktop.menu.app": "OpenCode",
+      "provider.connect.apiKey.description": "{{provider}} in OpenCode",
+      "provider.connect.opencode.name": "OpenCode Console",
+      "settings.about.trademark": "OpenCode is a registered trademark",
+    }
+
+    const branded = brandedDictionary(source)
+    expect(branded["desktop.menu.app"]).toBe("Lingxi")
+    expect(formatDesktopNativeMessage(branded["provider.connect.apiKey.description"], { provider: "OpenCode Console" })).toBe("OpenCode Console in Lingxi")
+    expect(branded["provider.connect.opencode.name"]).toBe("OpenCode Console")
+    expect(branded["settings.about.trademark"]).toBe("OpenCode is a registered trademark")
+    expect(source["desktop.menu.app"]).toBe("OpenCode")
+    expect(createDesktopNativeBundle("de", () => "OpenCode").messages["desktop.menu.app"]).toBe("Lingxi")
+  })
+
   test("accepts the exact typed bundle", () => {
     const bundle = createDesktopNativeBundle("en", (key) => DESKTOP_NATIVE_ENGLISH[key])
     expect(parseDesktopNativeBundle(bundle)).toEqual(bundle)
