@@ -105,6 +105,14 @@ export function lingxiUpdates(ctx: SetupContext<typeof definition>) {
         <div data-component="settings-list">
           <div data-component="settings-row">
             <div data-slot="settings-row-copy">
+              <div data-slot="settings-row-title">{ctx.t("lingxi.version")}</div>
+            </div>
+            <div data-slot="settings-row-control" class="text-v2-text-text-muted tabular-nums select-text">
+              {ctx.build.version}
+            </div>
+          </div>
+          <div data-component="settings-row">
+            <div data-slot="settings-row-copy">
               <div data-slot="settings-row-title">{title()}</div>
               <div data-slot="settings-row-description">{ctx.t("lingxi.nextLaunch")}</div>
             </div>

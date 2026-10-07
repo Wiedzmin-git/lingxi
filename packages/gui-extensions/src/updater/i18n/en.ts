@@ -1,4 +1,5 @@
 export default {
+  "lingxi.version": "Installed version",
   "lingxi.automatic": "Lingxi checks for updates automatically while open.",
   "lingxi.available": "Lingxi update available: {{version}}",
   "lingxi.staged": "Lingxi update downloaded: {{version}}",
@@ -7,10 +8,13 @@ export default {
   "lingxi.verifying": "Verifying update…",
   "lingxi.selectionChanged": "The update selection changed or another operation is running. Check for updates again.",
   "lingxi.ready": "Update ready",
-  "lingxi.nextLaunch": "The downloaded update will be applied the next time you close and open Lingxi. Your current work continues.",
+  "lingxi.nextLaunch":
+    "The downloaded update will be applied the next time you close and open Lingxi. Your current work continues.",
   "lingxi.unmanaged": "Open Lingxi through its installed launcher to check for updates.",
-  "lingxi.failed": "Could not check or download the update. Check your connection and saved release key, then check again. The current version is still running.",
-  "lingxi.updates": "Lingxi updates are managed by the independent launcher. Use the installed Stage updates shortcut, then close and reopen Lingxi when convenient.",
+  "lingxi.failed":
+    "Could not check or download the update. Check your connection and saved release key, then check again. The current version is still running.",
+  "lingxi.updates":
+    "Lingxi updates are managed by the independent launcher. Use the installed Stage updates shortcut, then close and reopen Lingxi when convenient.",
   "lingxi.instructions": "Lingxi update instructions",
   "status.label": "Update",
   "action.checkNow": "Check now",
