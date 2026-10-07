@@ -6,6 +6,7 @@ import { Effect, FileSystem, Option, Schema } from "effect"
 import { randomBytes } from "crypto"
 import path from "path"
 import { selfCommand } from "../util/process"
+import { profileBinding, profileEnvironment } from "@opencode/util/profile-binding"
 
 // The CLI's service configuration file, plus the Service.EnsureOptions binding that
 // points the client package's service operations at this CLI: which
@@ -33,6 +34,7 @@ export function filename(channel = OPENCODE_CHANNEL) {
 }
 
 export function defaultPort(channel = OPENCODE_CHANNEL) {
+  if (profileBinding) return profileBinding.servicePort
   if (channel === "latest" || channel === "dev" || channel === "beta" || channel === "next") return 0xc0de
   if (channel === "local") return 0xc0df
   return 10_000 + (Number.parseInt(Hash.fast(channel).slice(0, 8), 16) % 50_000)
@@ -94,6 +96,14 @@ function configKey(key: string): Key {
 const paths = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const global = yield* Global.Service
+  if (profileBinding)
+    return {
+      fs,
+      file: profileBinding.serviceRegistration,
+      configFile: profileBinding.serviceConfig,
+      legacyConfigFile: undefined,
+      legacyRegistrationFiles: [],
+    }
   const name = filename()
   const legacy = legacyFilename()
   const file = path.join(global.state, name)
@@ -114,13 +124,10 @@ export const options = Effect.fnUntraced(function* (input: { readonly checkVersi
   yield* Effect.forEach(legacyRegistrationFiles, (legacy) => migrateRegistration(legacy, file))
   return {
     file,
+    ...(profileBinding ? { existingService: "preserve" as const } : {}),
     version: input.checkVersion ? OPENCODE_VERSION : undefined,
-    env: (yield* read()).env,
-    command: [
-      ...selfCommand(),
-      "serve",
-      "--service",
-    ],
+    env: profileEnvironment ? { ...(yield* read()).env, ...profileEnvironment } : (yield* read()).env,
+    command: [...selfCommand(), "serve", "--service"],
   }
 })
 

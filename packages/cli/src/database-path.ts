@@ -1,7 +1,9 @@
 import path from "node:path"
 import { OPENCODE_CHANNEL } from "./version"
+import { profileBinding } from "@opencode/util/profile-binding"
 
 export function databasePath(data: string) {
+  if (profileBinding) return profileBinding.database
   const filename =
     process.env.OPENCODE_DB ??
     (["latest", "dev", "beta", "next", "prod"].includes(OPENCODE_CHANNEL) ||

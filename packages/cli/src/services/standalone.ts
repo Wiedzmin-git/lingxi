@@ -4,6 +4,7 @@ import { Deferred, Effect, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { randomBytes } from "node:crypto"
 import { selfCommand } from "../util/process"
+import { profileBinding } from "@opencode/util/profile-binding"
 
 const Ready = Schema.Struct({ url: Schema.String })
 const decodeReady = Schema.decodeUnknownPromise(Schema.fromJsonString(Ready))
@@ -34,6 +35,8 @@ function command(password: string, options: Options) {
 
 const makeEndpoint = Effect.fn("cli.standalone.endpoint")(
   function* (options: Options) {
+    if (profileBinding)
+      return yield* Effect.fail(new Error("Standalone mode conflicts with the Lingxi profile binding"))
     const password = randomBytes(32).toString("base64url")
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const proc = yield* spawner.spawn(command(password, options))

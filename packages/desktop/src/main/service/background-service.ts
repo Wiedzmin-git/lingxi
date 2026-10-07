@@ -4,6 +4,7 @@ import { BackgroundServiceState } from "./background-service-state"
 import { cleanStages, DesktopCli } from "./desktop-cli"
 import { SidecarCredentials } from "./sidecar-credentials"
 import { connectSessionLink, prepareSessionLink } from "./session-link"
+import { profileBinding } from "@opencode/util/profile-binding"
 
 export * as BackgroundService from "./background-service"
 
@@ -42,9 +43,10 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
     client.Service.ensure({
       existingService: "preserve",
       file:
-        isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
+        profileBinding?.serviceRegistration ??
+        (isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
           ? path.join(app.getPath("userData"), "opencode", "service-local.json")
-          : undefined,
+          : undefined),
       version,
       env: linkEnvironment,
       // A fixed port makes a second contender fail to bind and back off; port 0 never collides, so two
@@ -61,7 +63,9 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
   // A service with the required version is adopted at once; ensure() still runs
   // afterwards for its side effects (terminal handoff completion), off the renderer's path.
   const early =
-    mode === "initial" && !isolated ? yield* Effect.promise(() => client.Service.discover({ version })) : undefined
+    mode === "initial" && !isolated
+      ? yield* Effect.promise(() => client.Service.discover({ version, file: profileBinding?.serviceRegistration }))
+      : undefined
   if (early) yield* Effect.sync(() => void ensure().catch(() => undefined))
   const service = early ?? (yield* Effect.tryPromise(ensure))
   if (service.auth?.type !== "basic") throw new Error("V2 CLI background service did not provide authentication")

@@ -16,6 +16,7 @@ import { RetainedImage } from "./services/retained-image"
 import { ServiceRegistration } from "./services/service-registration"
 import { WebUi } from "./services/web-ui"
 import { databasePath } from "./database-path"
+import { profileBinding, profileEnvironment } from "@opencode/util/profile-binding"
 
 export type Mode = "default" | "service" | "stdio"
 
@@ -28,12 +29,23 @@ export type Options = {
 
 // The process effect lives until server shutdown; tracing it would parent every request to one process-lifetime trace.
 export const run = Effect.fnUntraced(function* (options: Options) {
+  if (
+    profileBinding &&
+    (options.mode !== "service" || (options.port !== undefined && options.port !== profileBinding.servicePort))
+  )
+    return yield* Effect.fail(new Error("Lingxi profile requires its bound managed service"))
   return yield* processEffect(options).pipe(
     Effect.provide(
       LayerNode.compile(LayerNode.group([Global.node, AppProcess.node]), {
         replacements: [
           Global.node.replace(
-            Global.layerWith(process.env.OPENCODE_CONFIG_DIR ? { config: process.env.OPENCODE_CONFIG_DIR } : {}),
+            Global.layerWith(
+              profileEnvironment
+                ? { config: profileEnvironment.OPENCODE_CONFIG_DIR }
+                : process.env.OPENCODE_CONFIG_DIR
+                  ? { config: process.env.OPENCODE_CONFIG_DIR }
+                  : {},
+            ),
           ),
         ],
       }),
@@ -62,6 +74,8 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
       const foreground = options.mode === "default"
       const serviceOptions = options.mode === "service" ? yield* ServiceConfig.options() : undefined
       const config = options.mode === "service" ? yield* ServiceConfig.read() : {}
+      if (profileBinding && config.port !== undefined && config.port !== profileBinding.servicePort)
+        return yield* Effect.fail(new Error("Service configuration conflicts with the Lingxi profile port"))
       const hostname = options.hostname ?? config.hostname ?? "127.0.0.1"
       const port = options.port ?? config.port ?? (options.mode === "service" ? ServiceConfig.defaultPort() : undefined)
       const findIncumbent =
@@ -110,7 +124,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
             fetch: !truthy(process.env.OPENCODE_DISABLE_MODELS_FETCH),
           },
           config: {
-            directory: process.env.OPENCODE_CONFIG_DIR,
+            directory: profileEnvironment?.OPENCODE_CONFIG_DIR ?? process.env.OPENCODE_CONFIG_DIR,
             project: !truthy(
               process.env.OPENCODE_CONFIG_PROJECT_DISABLE ?? process.env.OPENCODE_DISABLE_PROJECT_CONFIG,
             ),

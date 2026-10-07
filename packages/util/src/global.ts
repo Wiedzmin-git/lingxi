@@ -8,6 +8,7 @@ import { Context, Effect, Layer } from "effect"
 import { roots } from "#global-roots"
 import { Flock } from "./flock.js"
 import { makeGlobalNode } from "./effect/app-node.js"
+import { profileBinding } from "./profile-binding.js"
 
 const app = "opencode"
 const { data, cache, config, state, tmp } = roots(app)
@@ -76,7 +77,9 @@ const acquire = (input: Partial<Interface>) =>
 
 const layer = Layer.effect(
   Service,
-  Effect.suspend(() => acquire({ config: process.env.OPENCODE_CONFIG_DIR ?? Path.config })),
+  Effect.suspend(() =>
+    acquire({ config: profileBinding ? Path.config : (process.env.OPENCODE_CONFIG_DIR ?? Path.config) }),
+  ),
 )
 
 export const node = makeGlobalNode({ service: Service, layer: layer, deps: [] })
