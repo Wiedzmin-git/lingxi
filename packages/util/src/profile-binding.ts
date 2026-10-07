@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import path from "node:path"
 
 const paths = [
@@ -27,6 +28,7 @@ export const profileEnvironment = profileBinding
   ? Object.freeze({
       LINGXI_PROFILE_BINDING: process.env.LINGXI_PROFILE_BINDING!,
       LINGXI_PROFILE_ID: profileBinding.id,
+      ...(process.env.LINGXI_PROFILE_DIGEST ? { LINGXI_PROFILE_DIGEST: process.env.LINGXI_PROFILE_DIGEST } : {}),
       OPENCODE_CONFIG_DIR: path.join(profileBinding.configHome, "opencode"),
       OPENCODE_DB: profileBinding.database,
       XDG_DATA_HOME: profileBinding.dataHome,
@@ -41,7 +43,14 @@ function load(): ProfileBinding | undefined {
   const id = process.env.LINGXI_PROFILE_ID
   if (file === undefined && id === undefined) return
   if (!file || !fullyQualified(file) || !id) throw new Error("Incomplete Lingxi profile binding")
-  const value: unknown = JSON.parse(readFileSync(file, "utf8"))
+  const bytes = readFileSync(file)
+  const digest = process.env.LINGXI_PROFILE_DIGEST
+  if (
+    digest !== undefined &&
+    (!/^[a-f0-9]{64}$/.test(digest) || createHash("sha256").update(bytes).digest("hex") !== digest)
+  )
+    throw new Error("Lingxi profile descriptor digest mismatch")
+  const value: unknown = JSON.parse(bytes.toString("utf8"))
   if (
     typeof value !== "object" ||
     value === null ||

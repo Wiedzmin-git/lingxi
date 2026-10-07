@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 
 test("explicit profile binding rejects incomplete identities and paths before selecting storage", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "lingxi-binding-"))
@@ -33,6 +33,7 @@ test("explicit profile binding rejects incomplete identities and paths before se
       "bad-json",
       "bad-port",
       "bad-format",
+      "bad-digest",
       ...(process.platform === "win32" ? ["root-relative-db", "root-relative-descriptor"] : []),
     ]) {
       const value = {
@@ -59,6 +60,12 @@ test("explicit profile binding rejects incomplete identities and paths before se
                   ? file + ".missing"
                   : file,
             LINGXI_PROFILE_ID: scenario === "missing-id" ? "" : scenario === "wrong-id" ? randomUUID() : id,
+            LINGXI_PROFILE_DIGEST:
+              scenario === "bad-digest"
+                ? "0".repeat(64)
+                : createHash("sha256")
+                    .update(scenario === "bad-json" ? "{" : JSON.stringify(value))
+                    .digest("hex"),
           },
           stdout: "pipe",
           stderr: "pipe",

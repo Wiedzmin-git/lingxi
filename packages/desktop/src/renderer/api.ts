@@ -19,6 +19,7 @@ export const api: ElectronAPI = {
   sessionLink: (request) => invoke("SessionLinkManage", { request }),
   awaitInitialization: () => invoke("AppAwaitInitialization"),
   reconnectService: () => invoke("AppReconnectService"),
+  reportStartupReady: () => invoke("AppReportStartupReady"),
   consumeInitialDeepLinks: () => invoke("AppConsumeInitialDeepLinks").then(mutable),
   getDefaultServerUrl: () => invoke("AppGetDefaultServerUrl"),
   setDefaultServerUrl: (url) => invoke("AppSetDefaultServerUrl", { url }),

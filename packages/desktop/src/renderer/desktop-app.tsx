@@ -17,7 +17,7 @@ import {
 } from "@opencode/app/desktop"
 import { useTheme } from "@opencode/ui/theme/context"
 import type { BaseRouterProps } from "@solidjs/router"
-import { createEffect, createMemo, createResource, lazy, Show, Suspense } from "solid-js"
+import { createEffect, createMemo, createResource, lazy, onCleanup, Show, Suspense } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { ElectronAPI } from "./api-types"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
@@ -38,6 +38,7 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   const route = currentRoute(url.pathname, url.search)
   const [startup, setStartup] = createStore({
     ready: false,
+    launcherReady: false,
     visible: true,
     themeReady: false,
     onboardingReady: false,
@@ -50,10 +51,7 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   const [firstLaunch] = createResource(() =>
     bootstrap.firstLaunchPending !== undefined
       ? Promise.resolve(bootstrap.firstLaunchPending)
-      : props.api.isFirstLaunchOnboardingPending().catch((error) => {
-          console.error("[desktop-onboarding] first launch check failed", error)
-          return false
-        }),
+      : props.api.isFirstLaunchOnboardingPending(),
   )
   const platform = createDesktopPlatform(props.api, windowState)
   const [sidecar, { mutate: setSidecar }] = createResource(() => props.api.awaitInitialization())
@@ -69,6 +67,7 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
   const router = (routerProps: BaseRouterProps) => <DesktopMemoryRouter {...routerProps} windowID={windowState.id} />
   const readyToReveal = () =>
     startup.ready &&
+    startup.launcherReady &&
     (!import.meta.env.OPENCODE_TEST_ONBOARDING || !firstLaunch() || initialUrl !== "/" || startup.drawingReady)
 
   // Reveal only after the theme and the first-launch splash choice are both resolved.
@@ -114,26 +113,31 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
       <Show when={ready()}>
         <Show when={startupServer()} keyed>
           {(key) => (
-            <AppInterface defaultServer={key} servers={servers()} router={router}>
-              <DesktopStartupReady
-                routeReady={!initialRoute.loading && startup.onboardingReady}
-                onReady={() => setStartup("ready", true)}
-                onRoute={(route) => setStartup("route", route)}
-              />
-              <DesktopFirstLaunchOnboarding
-                api={props.api}
-                initialUrl={initialUrl}
-                serverKey={key}
-                pending={firstLaunch() ?? false}
-                onReady={() => setStartup("onboardingReady", true)}
-              />
-              <DesktopEffects api={props.api} />
-              <Suspense fallback={null}>
-                <Show when={initializationData(sidecar)} keyed>
-                  {(server) => <MigrationStatus server={server} />}
-                </Show>
-              </Suspense>
-            </AppInterface>
+            <div class="size-full" inert={!startup.launcherReady}>
+              <AppInterface defaultServer={key} servers={servers()} router={router}>
+                <DesktopStartupReady
+                  routeReady={!initialRoute.loading && !initialRoute.error && !locale.error && startup.onboardingReady}
+                  themeReady={startup.themeReady}
+                  reportReady={() => props.api.reportStartupReady()}
+                  onAccepted={() => setStartup("launcherReady", true)}
+                  onReady={() => setStartup("ready", true)}
+                  onRoute={(route) => setStartup("route", route)}
+                />
+                <DesktopFirstLaunchOnboarding
+                  api={props.api}
+                  initialUrl={initialUrl}
+                  serverKey={key}
+                  pending={firstLaunch() ?? false}
+                  onReady={() => setStartup("onboardingReady", true)}
+                />
+                <DesktopEffects api={props.api} interactive={startup.launcherReady} />
+                <Suspense fallback={null}>
+                  <Show when={initializationData(sidecar)} keyed>
+                    {(server) => <MigrationStatus server={server} />}
+                  </Show>
+                </Suspense>
+              </AppInterface>
+            </div>
           )}
         </Show>
       </Show>
@@ -177,6 +181,9 @@ export function DesktopApp(props: { api: ElectronAPI; version: string }) {
 
 function DesktopStartupReady(props: {
   routeReady: boolean
+  themeReady: boolean
+  reportReady: () => Promise<void>
+  onAccepted: () => void
   onReady: () => void
   onRoute: (route: LayoutRoute) => void
 }) {
@@ -187,13 +194,41 @@ function DesktopStartupReady(props: {
     if (!props.routeReady || !tabs.ready() || !tabs.infoReady()) return
     props.onReady()
   })
+  // Keep the scheduled report inside the recovery boundary: failed onboarding
+  // or rendering disposes this owner and cancels the pending frames.
+  createEffect(() => {
+    if (!props.routeReady || !props.themeReady || !tabs.ready() || !tabs.infoReady()) return
+    let disposed = false
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        void props
+          .reportReady()
+          .then(() => {
+            if (!disposed) props.onAccepted()
+          })
+          .catch((error) => console.error("[launcher-readiness]", error))
+      })
+    })
+    onCleanup(() => {
+      disposed = true
+      cancelAnimationFrame(frame)
+    })
+  })
   return null
 }
 
-function DesktopEffects(props: { api: ElectronAPI }) {
+function DesktopEffects(props: { api: ElectronAPI; interactive: boolean }) {
   const command = useCommand()
   bindDesktopMenu((id) => command.trigger(id))
   const theme = useTheme()
+
+  createEffect(() => {
+    if (!props.interactive) return
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === document.body) command.trigger("input.focus")
+    })
+    onCleanup(() => cancelAnimationFrame(frame))
+  })
 
   createEffect(() => {
     theme.themeId()

@@ -17,6 +17,7 @@ export type ElectronAPI = {
   sessionLink(request: SessionLinkRequest): Promise<SessionLinkResult>
   awaitInitialization(): Promise<ServerReadyData>
   reconnectService(): Promise<ServerReadyData>
+  reportStartupReady(): Promise<void>
   consumeInitialDeepLinks(): Promise<string[]>
   getDefaultServerUrl(): Promise<string | null>
   setDefaultServerUrl(url: string | null): Promise<void>

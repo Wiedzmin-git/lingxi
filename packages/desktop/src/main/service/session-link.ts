@@ -19,6 +19,10 @@ type Host = {
 let host: Host | undefined
 let boundServer: string | undefined
 
+export function sessionLinkReadyFor(server: string) {
+  return boundServer === server
+}
+
 export const prepareSessionLink = Effect.fn("Desktop.prepareSessionLink")(function* () {
   if (host) return host.environment
   const paths = yield* DesktopPaths.resolve
@@ -60,11 +64,14 @@ export async function manageSessionLink(request: SessionLinkRequest): Promise<Se
       clipboard.writeText(value.invitation)
       return { ok: true, copied: true }
     }
-    if (["status", "contacts", "mail"].includes(request.operation)) return Schema.decodeUnknownSync(SessionLinkResult)(result)
+    if (["status", "contacts", "mail"].includes(request.operation))
+      return Schema.decodeUnknownSync(SessionLinkResult)(result)
     return { ok: true }
   } catch (error) {
-    const code = error instanceof Error && "code" in error && typeof error.code === "string" && /^[a-z_]+$/.test(error.code)
-      ? error.code : "r2_unavailable"
+    const code =
+      error instanceof Error && "code" in error && typeof error.code === "string" && /^[a-z_]+$/.test(error.code)
+        ? error.code
+        : "r2_unavailable"
     return { error: code }
   }
 }

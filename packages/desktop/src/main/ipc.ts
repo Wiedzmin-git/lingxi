@@ -15,6 +15,7 @@ import { menuHandlers } from "./ipc-handlers/menu"
 import { storageHandlers } from "./ipc-handlers/storage"
 import { windowHandlers } from "./ipc-handlers/window"
 import { sessionLinkHandlers } from "./ipc-handlers/session-link"
+import { launcherHandlers } from "./ipc-handlers/launcher"
 import { IpcPortHandoff, IpcServerProtocolLive } from "./ipc-transport"
 import { ApplicationLifecycle } from "./lifecycle"
 import { showCliInstaller } from "./native/install-cli"
@@ -33,6 +34,7 @@ const handlers = Layer.mergeAll(
   eventHandlers,
   extensionHandlers,
   sessionLinkHandlers,
+  launcherHandlers,
 )
 
 export const layer = RpcServer.layer(DesktopRpcs, { disableFatalDefects: true }).pipe(
