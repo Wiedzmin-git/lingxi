@@ -23,14 +23,15 @@ export function configureApplication() {
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
-  if (!app.isPackaged)
+  if (!app.isPackaged || process.env.OPENCODE_DESKTOP_REMOTE_DEBUGGING_PORT)
     app.commandLine.appendSwitch("remote-debugging-port", process.env.OPENCODE_DESKTOP_REMOTE_DEBUGGING_PORT ?? "9222")
 
   const testRoot = createTestRoot()
   app.setPath("userData", testRoot ? path.join(testRoot, "desktop") : path.join(app.getPath("appData"), APP_ID))
   if (testRoot) {
     app.setPath("sessionData", path.join(testRoot, "session"))
-    if (testOnboarding) app.setPath("documents", path.join(testRoot, "documents"))
+    app.setPath("documents", path.join(testRoot, "documents"))
+    app.setPath("downloads", path.join(testRoot, "downloads"))
   }
   // V8 bytecode for the main bundle survives between launches, like the renderer's code cache.
   enableCompileCache(path.join(app.getPath("userData"), "compile-cache"))
@@ -45,12 +46,12 @@ export function acquireApplicationLock() {
 function createTestRoot() {
   const root = testOnboarding
     ? path.join(tmpdir(), `opencode-onboarding-${randomUUID()}`)
-    : app.isPackaged
-      ? undefined
-      : process.env.OPENCODE_DESKTOP_TEST_ROOT
+    : (process.env.OPENCODE_DESKTOP_PROFILE_ROOT ??
+      (app.isPackaged ? undefined : process.env.OPENCODE_DESKTOP_TEST_ROOT))
   if (!root) return undefined
+  if (!path.isAbsolute(root)) throw new Error("Desktop profile root must be absolute")
   if (testOnboarding) rmSync(root, { recursive: true, force: true })
-  for (const dir of ["data", "config", "cache", "state", "desktop", "session", "documents"])
+  for (const dir of ["data", "config", "cache", "state", "desktop", "session", "documents", "downloads"])
     mkdirSync(path.join(root, dir), { recursive: true })
   if (testOnboarding) process.env.OPENCODE_DB = ":memory:"
   process.env.XDG_DATA_HOME = path.join(root, "data")

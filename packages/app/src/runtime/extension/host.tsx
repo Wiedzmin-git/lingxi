@@ -297,6 +297,16 @@ function createHost(input: HostInput) {
   const list = <T,>(point: Point<T>) => items(point).map((item) => item.value)
 
   const links: Links = {
+    reveal(link) {
+      const handler = untrack(() => list(LinkHandler))
+        .filter((item) => item.match(link))
+        .reduce<LinkHandler | undefined>(
+          (best, item) => (!best || (item.priority ?? 0) > (best.priority ?? 0) ? item : best),
+          undefined,
+        )
+
+      return handler?.reveal?.(link)
+    },
     open(link) {
       const handler = untrack(() => list(LinkHandler))
         .filter((item) => item.match(link))

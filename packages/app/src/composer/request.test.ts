@@ -9,6 +9,50 @@ function inline(filename: string, mime: string, extra?: Partial<ImageAttachmentP
 }
 
 describe("buildPromptRequest", () => {
+  test("sends exact message quotes and their source identity without turning quoted mentions into files", () => {
+    const quote = {
+      sessionID: "ses_source",
+      messageID: "msg_source",
+      userMessageID: "msg_user",
+      partID: "part_source",
+      text: "Compare @src/example.ts\nمرحبا",
+      start: 12,
+      end: 46,
+      before: "Repeated: ",
+      after: " next",
+      number: 1,
+    }
+
+    const result = buildPromptRequest({
+      prompt: [],
+      context: [
+        {
+          key: "note:message:c=1",
+          type: "note",
+          origin: "message",
+          label: "Quote 1",
+          icon: "comment",
+          subject: "a message",
+          commentID: "1",
+          quote,
+          comment: "Explain this",
+        },
+      ],
+      images: [],
+      text: "",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.comments[0]).toMatchObject({ quote, comment: "Explain this" })
+    expect(result.text).toContain(
+      JSON.stringify({ sessionID: "ses_source", messageID: "msg_source", partID: "part_source" }),
+    )
+    expect(result.text).toContain(JSON.stringify(quote.text))
+    expect(result.text).toContain("Explain this")
+    expect(result.files).toEqual([])
+    expect(result.displayText).toBe("")
+  })
+
   test("builds text, files, and agents from the prompt", () => {
     const prompt: Prompt = [
       { type: "text", content: "hello", start: 0, end: 5 },
@@ -122,6 +166,7 @@ describe("buildPromptRequest", () => {
       },
       comment: "Match @src/button.css",
     }
+
     const result = buildPromptRequest({
       prompt: [{ type: "text", content: "tidy up", start: 0, end: 7 }],
       context: [{ ...note, key: "note:example:c=1", commentID: "1" }],
@@ -143,6 +188,7 @@ describe("buildPromptRequest", () => {
       id: "skill-review",
       name: "review",
     }
+
     const result = buildPromptRequest({
       prompt: [
         {

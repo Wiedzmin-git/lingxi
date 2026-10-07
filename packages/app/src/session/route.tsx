@@ -1,4 +1,5 @@
-import { ErrorBoundary, createEffect, createMemo, Show, type ParentProps } from "solid-js"
+import { ErrorBoundary, createEffect, createMemo, Show, type JSX, type ParentProps } from "solid-js"
+import { createMediaQuery } from "@solid-primitives/media"
 import { useParams } from "@solidjs/router"
 import { DataProvider } from "@opencode/session-ui/context"
 import { SessionUserMessage } from "@opencode/session-ui/message"
@@ -14,6 +15,7 @@ import { useNotification } from "@/shell/notifications/notification"
 import { ComposerPersistenceProvider } from "@/composer/persistence"
 import { useData, useServer } from "@/runtime/server/current"
 import { ServerConnection } from "@/runtime/server/registry"
+import { useLayout } from "@/shell/state/layout"
 import { useSettingsCommand } from "@/settings/command"
 import { SessionUIProvider } from "@/shell/routes/session-ui-provider"
 import { useTabs, type PendingSession } from "@/shell/tabs/tabs"
@@ -26,6 +28,12 @@ import { SessionErrorFallback } from "./route-error"
 import { createSessionResolution } from "./session-resolution"
 import { SessionScreenView } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
+import {
+  clampSessionContentWidth,
+  SESSION_CONTENT_WIDTH_DEFAULT,
+  SESSION_CONTENT_WIDTH_DEFAULT_WIDE,
+  SESSION_CONTENT_WIDTH_GUTTER,
+} from "./session-panel-width"
 
 export function TargetSessionRouteContent() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -52,9 +60,23 @@ export function TargetSessionRouteContent() {
 function PreparingSession(props: { sessionID: string; pending: PendingSession }) {
   const language = useLanguage()
   const providers = useProviders(() => props.pending.draft.directory)
+  const layout = useLayout()
+  const wideDesktop = createMediaQuery("(min-width: 96rem)")
+  const contentWidth = createMemo(() =>
+    clampSessionContentWidth({
+      width:
+        layout.session.contentWidth() ??
+        (wideDesktop() ? SESSION_CONTENT_WIDTH_DEFAULT_WIDE : SESSION_CONTENT_WIDTH_DEFAULT),
+      available: undefined,
+    }),
+  )
 
   return (
-    <SessionStatePanel>
+    <SessionStatePanel
+      style={{
+        "--session-content-width": `min(${contentWidth()}px, max(0px, calc(100% - ${SESSION_CONTENT_WIDTH_GUTTER}px)))`,
+      }}
+    >
       <DataProvider
         directory={props.pending.draft.directory}
         data={{
@@ -66,7 +88,7 @@ function PreparingSession(props: { sessionID: string; pending: PendingSession })
       >
         <div data-component="session-preparing" data-workspace-session class="min-h-0 flex-1 overflow-y-auto">
           <SessionIdentityHeader sessionID={props.sessionID} />
-          <div class="mx-auto w-full min-w-0 max-w-[1000px] px-4 pb-5 md:px-5">
+          <div class="mx-auto w-full min-w-0 max-w-[var(--session-content-width,1000px)] px-4 pb-5 md:px-5">
             <SessionUserMessage
               sessionID={props.sessionID}
               message={props.pending.message}
@@ -158,9 +180,12 @@ function PendingSessionState(props: { sessionID: string }) {
   )
 }
 
-function SessionStatePanel(props: ParentProps) {
+function SessionStatePanel(props: ParentProps<{ style?: JSX.CSSProperties }>) {
   return (
-    <div class="flex min-h-0 flex-1 px-2 pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]">
+    <div
+      class="flex min-h-0 flex-1 px-2 pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]"
+      style={props.style}
+    >
       <SessionPanelFrame raised>{props.children}</SessionPanelFrame>
     </div>
   )

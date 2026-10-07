@@ -9,7 +9,11 @@ import { make } from "./machine"
 const setup: MainSetup<typeof definition> = async (ctx) => {
   const build = ctx.build
   const lifecycle = ctx.lifecycle
-  const enabled = build.packaged && build.channel !== "dev"
+
+  // A production-branded prerelease is a custom build; the stable updater would replace it with stock OpenCode.
+  const enabled =
+    build.packaged && build.channel !== "dev" && !(build.channel === "prod" && build.version.includes("-"))
+
   // Holds no resources, so it needs no cleanup.
   const context = logContext(ctx.log.write)
   const runPromise = Effect.runPromiseWith(context)

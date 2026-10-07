@@ -1,9 +1,11 @@
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
-import { LanguageModel } from "@opencode/ai"
+import { AIError, InvalidRequestError, LanguageModel } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols"
 import { TestLLM } from "@opencode/ai/testing"
 import path from "path"
+import { createServer, type Socket } from "node:net"
+import { once } from "node:events"
 import { Money } from "@opencode/schema/money"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@opencode/core/effect/app-node-platform"
@@ -34,6 +36,11 @@ import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Permission } from "@opencode/core/permission"
 import { SubagentTool } from "@opencode/core/tool/plugin/subagent"
+import { ShellTool } from "@opencode/core/tool/plugin/shell"
+import { Shell } from "@opencode/core/shell"
+import { ShellSelect } from "@opencode/core/shell/select"
+import { Environment } from "@opencode/core/environment/index"
+import { FileAccess } from "@opencode/core/file-access"
 import { Tool } from "@opencode/core/tool"
 import { tmpdir } from "./fixture/tmpdir"
 import { tempGlobalLayer } from "./fixture/global"
@@ -139,12 +146,23 @@ const productionIt = testEffect(AppNodeBuilder.build(nodes, replacements))
 const it = testEffect(
   AppNodeBuilder.build(nodes, [...replacements, PluginSupervisor.node.replace(subagentPluginSupervisor)]),
 )
+const completionLLM = TestLLM.testLayer({ fallback: TestLLM.text(childText, "completion") })
+const completionPlugins = makeLocationNode({
+  name: "test/completion-plugins",
+  layer: Layer.effectDiscard(Effect.gen(function* () {
+    const hooks = yield* PluginHooks.Service
+    yield* registerToolPlugin(SubagentTool.Plugin, {}, (name, callback) => hooks.register("tool", name, callback))
+    yield* registerToolPlugin(ShellTool.Plugin)
+  })),
+  deps: [Agent.node, Config.node, Model.node, Permission.node, Session.node, Job.node, Tool.node, PluginHooks.node,
+    Environment.node, FileAccess.node, Shell.node, ShellSelect.node],
+})
 const completionIt = testEffect(
   AppNodeBuilder.build(LayerNode.group([nodes, SessionRestart.node, KV.node]), [
     Global.node.replace(tempGlobalLayer),
     offlineModels,
-    PluginSupervisor.node.replace(subagentPluginSupervisor),
-    LayerNodePlatform.llmClient.replace(TestLLM.testLayer({ fallback: TestLLM.text(childText, "completion") })),
+    PluginSupervisor.node.replace(completionPlugins),
+    LayerNodePlatform.llmClient.replace(completionLLM),
     SessionRunnerModel.node.replace(
       Layer.succeed(SessionRunnerModel.Service, {
         resolve: () =>
@@ -160,7 +178,7 @@ const completionIt = testEffect(
           ),
       }),
     ),
-  ]),
+  ]).pipe(Layer.provideMerge(completionLLM)),
 )
 
 const withSubagent = (location: Location.Ref) =>
@@ -185,6 +203,7 @@ const withSubagent = (location: Location.Ref) =>
         editor.update(Agent.ID.make("reviewer"), (agent) => {
           agent.mode = "subagent"
           agent.model = childModel
+          agent.permissions.push({ action: "*", resource: "*", effect: "allow" })
         })
         editor.update(Agent.ID.make("fallback"), (agent) => {
           agent.mode = "subagent"
@@ -197,6 +216,94 @@ const withSubagent = (location: Location.Ref) =>
   })
 
 describe("SubagentTool", () => {
+  for (const outcome of ["success", "failure", "cancel"] as const) {
+  completionIt.live(`delivers ${outcome === "failure" ? "continuation failure" : outcome === "cancel" ? "active Stop cancellation" : "the final child result"} with real child background execution`, () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(Effect.flatMap((dir) => Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* Job.Service
+      const llm = yield* TestLLM.Test
+      const parentStarted = yield* Deferred.make<void>()
+      const connected = Promise.withResolvers<Socket>()
+      const server = yield* Effect.acquireRelease(Effect.promise(async () => {
+        const server = createServer((socket) => connected.resolve(socket))
+        server.listen(0, "127.0.0.1")
+        await once(server, "listening")
+        return server
+      }), (server) => Effect.sync(() => server.close()))
+      const address = server.address()
+      if (!address || typeof address === "string") return yield* Effect.die("Expected local socket address")
+      const command = `${process.platform === "win32" ? "& " : ""}'${process.execPath}' -e "const c=require('net').connect(${address.port},'127.0.0.1');c.on('data',b=>process.stdout.write(b));c.on('end',()=>process.exit(0))"`
+      const parent = yield* sessions.create({ location: Location.Ref.make({ directory: AbsolutePath.make(dir.path) }), model: parentModel })
+      yield* withSubagent(parent.location)
+      const locations = yield* LocationServiceMap.Service
+      const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
+      yield* llm.serve((request) => {
+        const history = JSON.stringify(request.messages)
+        if (history.includes("PARENT_KEEP_BUSY"))
+          return Stream.fromEffect(Deferred.succeed(parentStarted, undefined)).pipe(Stream.flatMap(() => Stream.never))
+        if (history.includes("NESTED_ASYNC_TASK") && !history.includes("call-nested-shell"))
+          return TestLLM.tool("call-nested-shell", "shell", { command })
+        if (outcome === "failure" && history.includes("NESTED_ASYNC_TASK") && history.includes("ASYNC_RESULT_ARRIVED"))
+          return Stream.fail(new AIError({ reason: new InvalidRequestError({ message: "CONTINUATION_FAILED_SENTINEL" }) }))
+        return TestLLM.text(history.includes("NESTED_ASYNC_TASK")
+          ? history.includes("ASYNC_RESULT_ARRIVED") ? "FINAL_CHILD_RESULT" : "CHILD_WAITING_FOR_RESULT"
+          : "PARENT_RECEIVED_RESULT", "async-result")
+      })
+      const result = yield* executeTool(registry, {
+        sessionID: parent.id,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-child-async-result", name: SubagentTool.name,
+          input: { agent: "reviewer", description: "nested async review", prompt: "NESTED_ASYNC_TASK" } },
+      })
+      const childID = outputSessionID(result.metadata)
+      const socket = yield* Effect.acquireRelease(Effect.promise(() => connected.promise),
+        (socket) => Effect.sync(() => socket.destroy()))
+      yield* sessions.wait(childID)
+      expect((yield* sessions.context(childID)).some((message) =>
+        message.type === "assistant" && message.content.some((part) => part.type === "text" && part.text === "CHILD_WAITING_FOR_RESULT"),
+      )).toBe(true)
+      expect((yield* jobs.get(childID))?.status).toBe("running")
+      if (outcome === "cancel") {
+        // Windows may reset the fixture socket when Stop terminates the child.
+        // Still require the actual close event; unrelated socket errors fail.
+        const closed = new Promise<void>((resolve, reject) => {
+          socket.once("error", (error) => {
+            if (!("code" in error) || error.code !== "ECONNRESET") reject(error)
+          })
+          socket.once("close", () => resolve())
+        })
+        yield* sessions.prompt({ sessionID: parent.id, text: "PARENT_KEEP_BUSY" })
+        yield* Deferred.await(parentStarted)
+        yield* sessions.interrupt(parent.id)
+        yield* sessions.wait(parent.id)
+        yield* Effect.promise(() => closed)
+      }
+      if (outcome !== "cancel") yield* Effect.sync(() => socket.end("ASYNC_RESULT_ARRIVED"))
+      const terminal = (yield* jobs.wait({ id: childID })).info
+      // Notification acknowledgment may already have removed the terminal Job;
+      // the durable parent notice below is the final result contract.
+      if (terminal) expect(terminal.status).toBe(outcome === "failure" ? "error" : outcome === "cancel" ? "cancelled" : "completed")
+      // Waiting for notification admission, rather than observing an idle child,
+      // protects the delegated result from an interim 'waiting' answer.
+      yield* jobs.awaitBackground(parent.id)
+      yield* sessions.wait(parent.id)
+      const notices = (yield* sessions.context(parent.id)).filter((message) => message.type === "synthetic")
+      const inbox = (yield* sessions.inbox(parent.id)).filter((message) => message.type === "synthetic")
+      const texts = [...notices.map((message) => message.text), ...inbox.map((message) => message.payload.text)]
+      expect(texts).toHaveLength(1)
+      expect(texts[0]).toContain(outcome === "failure" ? 'state="error"' : outcome === "cancel" ? 'state="cancelled"' : "FINAL_CHILD_RESULT")
+      expect(texts[0]).not.toContain("CHILD_WAITING_FOR_RESULT")
+      expect((yield* llm.requests()).filter((request) => JSON.stringify(request.messages).includes("NESTED_ASYNC_TASK"))).toHaveLength(outcome === "cancel" ? 2 : 3)
+      if (outcome === "cancel")
+        expect((yield* llm.requests()).filter((request) => JSON.stringify(request.messages).includes("PARENT_KEEP_BUSY"))).toHaveLength(1)
+    }))),
+  )
+  }
+
+
   completionIt.live("admits one durable completion across live delivery and restart replay", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -371,7 +478,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-configured-nested-subagent",
               name: SubagentTool.name,
-              input: { agent: "reviewer", description: "nested", prompt: "should run" },
+                input: { agent: "reviewer", description: "nested", prompt: "should run", background: false },
             },
           })
 
@@ -413,7 +520,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-subagent",
               name: SubagentTool.name,
-              input: { agent: "reviewer", description: "review", prompt: "review this", model: "", sessionID: "" },
+              input: { agent: "reviewer", description: "review", prompt: "review this", model: "", sessionID: "", background: false },
             },
           })
 
@@ -443,7 +550,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-subagent-fallback",
               name: SubagentTool.name,
-              input: { agent: "fallback", description: "fallback", prompt: "fallback" },
+              input: { agent: "fallback", description: "fallback", prompt: "fallback", background: false },
             },
           })
           const fallbackChild = yield* sessions.get(outputSessionID(fallback.metadata))
@@ -474,7 +581,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-subagent-first",
               name: SubagentTool.name,
-              input: { agent: "reviewer", description: "review", prompt: "review this" },
+              input: { agent: "reviewer", description: "review", prompt: "review this", background: false },
             },
           })
           const childID = outputSessionID(first.metadata)
@@ -491,6 +598,7 @@ describe("SubagentTool", () => {
                 prompt: "continue this",
                 sessionID: childID,
                 model: "",
+                background: false,
               },
             },
           })
@@ -595,7 +703,7 @@ describe("SubagentTool", () => {
                 type: "tool-call" as const,
                 id,
                 name: SubagentTool.name,
-                input: { agent, description: "follow up", prompt: "continue", sessionID },
+                input: { agent, description: "follow up", prompt: "continue", sessionID, background: false },
               },
             })
 
@@ -679,7 +787,7 @@ describe("SubagentTool", () => {
                 type: "tool-call" as const,
                 id,
                 name: SubagentTool.name,
-                input: { agent: "reviewer", description: "review", prompt: "review this", ...input },
+                input: { agent: "reviewer", description: "review", prompt: "review this", background: false, ...input },
               },
             })
 
@@ -737,7 +845,7 @@ describe("SubagentTool", () => {
                 type: "tool-call",
                 id: "call-subagent-failure",
                 name: SubagentTool.name,
-                input: { agent: "reviewer", description: "fail review", prompt: "please fail" },
+                input: { agent: "reviewer", description: "fail review", prompt: "please fail", background: false },
               },
             }),
           ).toEqual({
@@ -752,7 +860,8 @@ describe("SubagentTool", () => {
     ),
   )
 
-  it.live("notifies once when background work completes", () =>
+  for (const background of [undefined, true]) {
+  it.live(`notifies once when ${background === undefined ? "default" : "explicit"} background work completes`, () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -780,7 +889,7 @@ describe("SubagentTool", () => {
               type: "tool-call",
               id: "call-background-subagent",
               name: SubagentTool.name,
-              input: { agent: "reviewer", description: "background review", prompt: "review", background: true },
+              input: { agent: "reviewer", description: "background review", prompt: "review", ...(background === undefined ? {} : { background }) },
             },
           })
           const childID = outputSessionID(settled.metadata)
@@ -813,4 +922,5 @@ describe("SubagentTool", () => {
       ),
     ),
   )
+  }
 })

@@ -4,6 +4,7 @@ import { BackgroundServiceState } from "./background-service-state"
 import { cleanStages, DesktopCli } from "./desktop-cli"
 import { SidecarCredentials } from "./sidecar-credentials"
 import { sidecarProbe } from "./sidecar-probe"
+import { connectSessionLink, prepareSessionLink } from "./session-link"
 
 export * as BackgroundService from "./background-service"
 
@@ -34,6 +35,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
   const runFork = Effect.runForkWith(yield* Effect.context())
   const isolated = !app.isPackaged && process.env.OPENCODE_DESKTOP_ISOLATED_SERVER === "1"
   const cli = yield* desktopCli.resolve
+  const linkEnvironment = yield* prepareSessionLink()
   const version = mode === "initial" ? cli.version : undefined
   if (isolated) process.env.XDG_STATE_HOME = app.getPath("userData")
   const client = yield* Effect.promise(() => import("@opencode/client/service"))
@@ -44,6 +46,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
           ? path.join(app.getPath("userData"), "opencode", "service-local.json")
           : undefined,
       version,
+      env: linkEnvironment,
       // A fixed port makes a second contender fail to bind and back off; port 0 never collides, so two
       // services could boot against the same database.
       command: [
@@ -71,6 +74,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
   if (mode === "initial" && isolated && cli.binary) yield* cleanStages(cli.binary).pipe(Effect.orDie)
   const ready = { url: url.origin, password: service.auth.password } satisfies SidecarCredentials.Data
   SidecarCredentials.set(ready)
+  yield* connectSessionLink(ready)
   return ready
 })
 

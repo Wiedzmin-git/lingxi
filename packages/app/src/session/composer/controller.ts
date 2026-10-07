@@ -48,7 +48,8 @@ export function createSessionComposerController(input: {
     queue,
     composer,
     drop: {
-      active: () => editable() && composer.state.drag === "active",
+      active: () => editable() && composer.state.drag !== "idle",
+      reference: () => composer.state.drag === "reference",
       input: () => composer.model.selection.current()?.capabilities.input,
     },
   }

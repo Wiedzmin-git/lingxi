@@ -22,7 +22,7 @@
 
 [data-titlebar-tab][data-orientation="vertical"]:has([data-slot="tab-project"]) [data-slot="tab-link"] {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   grid-template-rows: repeat(2, var(--line-height-compact));
   align-content: center;
   column-gap: 6px;
@@ -31,7 +31,7 @@
   line-height: var(--line-height-compact);
 }
 
-[data-titlebar-tab][data-orientation="vertical"] [data-slot="project-avatar-slot"] {
+[data-titlebar-tab][data-orientation="vertical"] [data-slot="session-reference-handle"] {
   grid-column: 1;
   grid-row: 1;
 }
@@ -131,8 +131,9 @@
   display: none;
 }
 
-[data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]) [data-slot="tab-link"],
-[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]) [data-slot="tab-link"] {
+/* Fade only the text: branch identity and reception permission must stay opaque. */
+[data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]) [data-slot="tab-title"],
+[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]) [data-slot="tab-title"] {
   --tab-title-fade-offset: 4px;
   -webkit-mask-image: linear-gradient(
     to right,
@@ -150,8 +151,8 @@
   );
 }
 
-[data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]):dir(rtl) [data-slot="tab-link"],
-[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]):dir(rtl) [data-slot="tab-link"] {
+[data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]):dir(rtl) [data-slot="tab-title"],
+[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]):dir(rtl) [data-slot="tab-title"] {
   -webkit-mask-image: linear-gradient(
     to left,
     black 0,
@@ -168,7 +169,7 @@
   );
 }
 
-[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]) [data-slot="tab-link"] {
+[data-titlebar-tab]:is(:hover, [data-active="true"]):not([data-editing="true"]) [data-slot="tab-title"] {
   --tab-title-fade-offset: 24px;
 }
 
@@ -200,8 +201,8 @@
     background: linear-gradient(var(--tab-overlay), var(--tab-overlay)), var(--tab-base);
   }
 
-  [data-titlebar-tab]:not([data-editing="true"]) [data-slot="tab-link"],
-  [data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]) [data-slot="tab-link"] {
+  [data-titlebar-tab]:not([data-editing="true"]) [data-slot="tab-title"],
+  [data-titlebar-tab][data-title-overflow="true"]:not([data-editing="true"]) [data-slot="tab-title"] {
     --tab-title-fade-offset: 24px;
     --tab-title-fade-direction: to right;
     -webkit-mask-image: linear-gradient(
@@ -220,7 +221,7 @@
     );
   }
 
-  [data-titlebar-tab]:dir(rtl) [data-slot="tab-link"] {
+  [data-titlebar-tab]:dir(rtl) [data-slot="tab-title"] {
     --tab-title-fade-direction: to left;
   }
 }
@@ -238,7 +239,36 @@
   }
 }
 
+/* Keep the original avatar footprint when tabs condense; the reference handle
+   must not displace the compact tab's close or remaining navigation area. */
+@container (max-width: 64px) {
+  [data-titlebar-tab]:not([data-orientation="vertical"]) [data-slot="branch-leading"] {
+    gap: 0;
+  }
+
+  [data-titlebar-tab]:not([data-orientation="vertical"]) [data-slot="session-reference-handle"] {
+    padding-inline: 0;
+  }
+
+}
+
 @container (max-width: 44px) {
+  /* Keep the full avatar as the drag target; the permission becomes a corner
+     badge only at the width where two separate glyphs cannot fit. */
+  [data-titlebar-tab]:not([data-orientation="vertical"]) [data-slot="branch-reception-indicator"] {
+    position: absolute;
+    inset-inline-end: -4px;
+    top: -3px;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  [data-titlebar-tab]:not([data-orientation="vertical"]) [data-slot="branch-reception-indicator"] svg {
+    width: 8px;
+    height: 8px;
+  }
+
   [data-titlebar-tab]:not([data-orientation="vertical"]) [data-titlebar-tab-link] {
     justify-content: center;
     gap: 0;

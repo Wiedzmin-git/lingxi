@@ -134,7 +134,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
       return
     }
 
-    renderComposerEditor(editor, parts)
+    renderComposerEditor(editor, parts, i18n.t("ui.promptInput.removeAttachment"))
   })
 
   // Kept out of JSX: an inline ternary prop compiles to a memo created on every read, and the popover reads
@@ -404,7 +404,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
 
 const mentionParts = new WeakMap<HTMLElement, Exclude<ComposerPrompt[number], ComposerAttachment | { type: "text" }>>()
 
-function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt) {
+function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt, removeLabel: string) {
   const active = document.activeElement === editor
   editor.replaceChildren(
     ...prompt.flatMap<Node>((part) => {
@@ -419,6 +419,24 @@ function renderComposerEditor(editor: HTMLDivElement, prompt: ComposerPrompt) {
       mention.style.unicodeBidi = "isolate"
       mention.dataset.mention =
         part.type === "file" && part.mime === "application/x-directory" ? "reference" : part.type
+
+      if (part.type === "session") {
+        mention.title = part.sessionID
+        const remove = document.createElement("button")
+        remove.type = "button"
+        remove.contentEditable = "false"
+        remove.setAttribute("aria-label", removeLabel)
+        remove.title = removeLabel
+        // No text node: editor/caret offsets stay those of the title, not the close control.
+        remove.addEventListener("mousedown", (event) => event.preventDefault())
+        remove.addEventListener("click", (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          mention.remove()
+          editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }))
+        })
+        mention.appendChild(remove)
+      }
 
       if (part.type === "agent") mention.dataset.name = part.name
 
@@ -464,6 +482,12 @@ function parseComposerEditor(editor: HTMLDivElement) {
     flush()
     const content = element.textContent ?? ""
     const original = mentionParts.get(element)
+
+    if (original?.type === "session") {
+      parts.push({ ...original, content, start: position, end: position + content.length })
+      position += content.length
+      return
+    }
 
     if (element.dataset.mention === "agent") {
       const agent: ComposerAgentPart = {
@@ -603,7 +627,11 @@ export function ComposerAttachments(props: {
             {(comment) => (
               <div class="relative group shrink-0">
                 <Tooltip
-                  value={comment.comment}
+                  value={
+                    comment.type === "note" && comment.quote
+                      ? `${comment.quote.text}\n\n${comment.comment}`
+                      : comment.comment
+                  }
                   placement="top"
                   openDelay={800}
                   contentClass="max-w-[300px] break-words"

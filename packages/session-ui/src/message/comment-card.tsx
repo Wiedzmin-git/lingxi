@@ -15,6 +15,7 @@ export function CommentCard(props: {
   target: CommentCardTarget
   active?: boolean
   title?: string
+  preview?: string
   tooltip?: boolean
   wide?: boolean
   onClick?: () => void
@@ -24,6 +25,7 @@ export function CommentCard(props: {
 
   onMount(() => {
     const element = title
+
     if (!element) return
     const sync = () => setTruncated(element.scrollWidth > element.clientWidth)
     const measure = () => requestAnimationFrame(sync)
@@ -38,8 +40,8 @@ export function CommentCard(props: {
     <Tooltip
       placement="top"
       openDelay={1000}
-      value={props.title ?? props.comment}
-      disabled={!props.tooltip || !truncated()}
+      value={props.preview ? `${props.preview}\n\n${props.comment}` : (props.title ?? props.comment)}
+      disabled={!props.tooltip || (!props.preview && !truncated())}
       class={props.wide ? "w-full" : undefined}
       contentStyle={{ "max-width": "320px", "white-space": "pre-wrap" }}
     >
@@ -79,7 +81,7 @@ export function CommentCard(props: {
           {(note) => (
             <>
               <Icon name={note().icon} data-slot="attachment-card-icon" />
-              <span data-slot="attachment-card-label" dir="ltr">
+              <span data-slot="attachment-card-label" dir="auto">
                 {note().label}
               </span>
             </>

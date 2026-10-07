@@ -668,7 +668,7 @@ export type SessionExecutionStarted = {
   type: "session.execution.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: string; executionID?: string }
 }
 
 export type SessionExecutionSucceeded = {
@@ -678,7 +678,7 @@ export type SessionExecutionSucceeded = {
   type: "session.execution.succeeded"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: string; executionID?: string }
 }
 
 export type SessionExecutionFailed = {
@@ -688,7 +688,7 @@ export type SessionExecutionFailed = {
   type: "session.execution.failed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; error: SessionStructuredError }
+  data: { sessionID: string; executionID?: string; error: SessionStructuredError }
 }
 
 export type SessionExecutionInterrupted = {
@@ -698,7 +698,7 @@ export type SessionExecutionInterrupted = {
   type: "session.execution.interrupted"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; reason: "user" | "shutdown" | "superseded" | "inactivity" }
+  data: { sessionID: string; executionID?: string; reason: "user" | "shutdown" | "superseded" | "inactivity" }
 }
 
 export type SessionInstructionsUpdated = {
@@ -745,6 +745,8 @@ export type SessionStepStarted = {
     model: ModelRef
     snapshot?: string
     started: number
+    inputMessageIDs?: Array<string>
+    executionID?: string
   }
 }
 
@@ -5964,6 +5966,13 @@ export type CredentialActivateOutput = void
 export type CredentialRemoveInput = { readonly credentialID: { readonly credentialID: string }["credentialID"] }
 
 export type CredentialRemoveOutput = void
+
+export type ProjectCreateInput = {
+  readonly parent: { readonly parent: string; readonly name: string }["parent"]
+  readonly name: { readonly parent: string; readonly name: string }["name"]
+}
+
+export type ProjectCreateOutput = { directory: string }
 
 export type ProjectListOutput = Array<Project>
 

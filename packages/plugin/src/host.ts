@@ -24,7 +24,8 @@ export function resolve(target: Target): Entrypoints {
         return resolveModule(specifier, target.directory)
       } catch (error) {
         if (
-          !(error instanceof Error) ||
+          // Bun ResolveMessage exposes the resolver code without inheriting Error.
+          typeof error !== "object" || error === null ||
           !("code" in error) ||
           ![
             "ENOENT",

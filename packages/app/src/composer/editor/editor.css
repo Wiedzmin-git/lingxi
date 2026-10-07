@@ -2,6 +2,38 @@
   content: "\200B";
 }
 
+[data-component="composer-editor"] [data-mention="session"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--v2-background-bg-layer-02);
+  border: 1px solid var(--v2-border-border-base);
+  line-height: var(--line-height-base);
+}
+
+[data-mention="session"] > button {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  position: relative;
+  border-radius: 3px;
+}
+
+[data-mention="session"] > button::before,
+[data-mention="session"] > button::after {
+  content: "";
+  position: absolute;
+  inset: 3px 6px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+[data-mention="session"] > button::after {
+  transform: rotate(-45deg);
+}
+
 /* Masks only cover hidden content; they do not reserve space in the toolbar. */
 [data-slot="composer-controls"][data-overflow-start="true"] {
   --mask-start: 16px;

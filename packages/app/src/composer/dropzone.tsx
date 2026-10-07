@@ -6,12 +6,14 @@ import { createAnimatedPresence } from "@/runtime/animated-presence"
 
 export function ComposerDropzone(props: {
   active: boolean
+  reference?: boolean
   input?: { image?: boolean; pdf?: boolean }
   identity?: () => unknown
 }) {
   const language = useLanguage()
   const [elements, setElements] = createStore<{ dropzone?: HTMLDivElement }>({})
   const label = createMemo(() => {
+    if (props.reference) return language.t("session.reference.drop")
     if (!props.input?.image && !props.input?.pdf) return language.t("ui.promptInput.dropFiles")
     if (!props.input.pdf) return language.t("ui.promptInput.dropFiles.image")
     if (!props.input.image) return language.t("ui.promptInput.dropFiles.pdf")
@@ -47,7 +49,7 @@ export function ComposerDropzone(props: {
         >
           <div class="absolute inset-0 bg-v2-background-bg-base/25" />
           <div
-            class="absolute inset-y-0 left-1/2 w-full -translate-x-1/2 md:max-w-200 2xl:max-w-[1000px]"
+            class="absolute inset-y-0 left-1/2 w-full -translate-x-1/2 md:max-w-[var(--session-content-width,1000px)]"
             style={{
               "-webkit-mask-image": "linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%)",
               "mask-image": "linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%)",
@@ -76,7 +78,7 @@ export function ComposerDropzone(props: {
               class="flex size-10 items-center justify-center rounded-full bg-[var(--session-dropzone-card)] text-v2-icon-icon-muted shadow-[var(--v2-elevation-floating)]"
               aria-hidden="true"
             >
-              <Icon name="arrow-up" size="normal" class="text-v2-icon-icon-muted" />
+              <Icon name={props.reference ? "link" : "arrow-up"} size="normal" class="text-v2-icon-icon-muted" />
             </div>
             <div class="text-[15px] font-[530] leading-6 text-v2-text-text-base">{presence.value()}</div>
           </div>

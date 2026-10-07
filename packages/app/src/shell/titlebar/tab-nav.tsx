@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show, type Ref } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Ref } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Predicate } from "effect"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -16,6 +16,14 @@ import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-prog
 import type { SessionInfo } from "@opencode/client/promise"
 import { sessionTabTitle } from "./tab-title"
 import { TabPreviewPopover } from "./tab-popover"
+import { useCopySessionID } from "@/session/copy-id"
+import { SessionReferenceHandle } from "@/composer/session-reference-handle"
+import { startSessionReferenceDrag } from "@/composer/session-reference"
+import { SESSION_TAB_DRAG_MIME } from "./tab-order"
+import { usePlatform } from "@/runtime/platform/platform"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { BranchMailDialog } from "@/session/branch-mail-dialog"
+import { BranchReceptionIndicator } from "@/session/branch-reception-indicator"
 import "./tab-nav.css"
 
 // MouseEvent.button uses 1 for the middle/wheel button.
@@ -37,9 +45,18 @@ export function TabNavItem(props: {
   pressed?: boolean
   hidden?: boolean
   orientation?: "horizontal" | "vertical"
+  move?: {
+    projects: { worktree: string; name: string }[]
+    select: (directory: string) => void
+  }
+  onTitleDragStart?: (event: DragEvent) => void
 }) {
   const language = useLanguage()
+  const copySessionID = useCopySessionID()
+  const platform = usePlatform()
+  const dialog = useDialog()
   const [menu, setMenu] = createStore({ open: false, rename: false })
+  const [gesture, setGesture] = createStore({ dragged: false })
   const [editing, setEditing] = createSignal(false)
   const [titleOverflowing, setTitleOverflowing] = createSignal(false)
   let tabRoot!: HTMLDivElement
@@ -261,8 +278,12 @@ export function TabNavItem(props: {
           event.stopPropagation()
         }}
         onMouseDown={(event) => {
-          // Navigate on mousedown to shave the press-release delay off tab switches.
+          // Titles need a completed click: a press may become a reference/reorder drag.
           if (event.button !== 0) return
+          setGesture("dragged", false)
+
+          if (event.target instanceof Element && event.target.closest("[data-session-reference-drag]")) return
+          if (event.target instanceof Element && event.target.closest("[data-titlebar-tab-title]")) return
 
           if (editing()) return
 
@@ -272,8 +293,9 @@ export function TabNavItem(props: {
         onClick={(event) => {
           event.preventDefault()
 
-          // Mouse navigation already happened on mousedown; detail 0 means keyboard activation.
-          if (event.detail > 0) return
+          if (gesture.dragged && event.detail > 0) return
+          // Other mouse targets already navigated on press; keyboard activation is detail 0.
+          if (event.detail > 0 && !(event.target instanceof Element && event.target.closest("[data-titlebar-tab-title]"))) return
 
           if (editing()) return
 
@@ -282,7 +304,8 @@ export function TabNavItem(props: {
         }}
         class="flex h-full min-w-0 flex-1 flex-row items-center gap-1.5 text-[13px] font-medium text-v2-text-text-faint group-data-[active='true']:text-v2-text-text-base group-data-[editing='true']:text-v2-text-text-base [-webkit-user-drag:none]"
       >
-        <span data-slot="project-avatar-slot" class="flex size-4 shrink-0 items-center justify-center">
+        <span data-slot="branch-leading" class="relative flex shrink-0 items-center gap-1.5">
+        <SessionReferenceHandle server={props.server} session={props.session} disabled={editing()}>
           <Show
             when={props.session}
             keyed
@@ -306,6 +329,10 @@ export function TabNavItem(props: {
               />
             )}
           </Show>
+        </SessionReferenceHandle>
+        <Show when={platform.sessionLink && props.session?.id}>
+          {(sessionID) => <BranchReceptionIndicator server={props.server} sessionID={sessionID()} />}
+        </Show>
         </span>
         <span
           ref={(el) => {
@@ -314,11 +341,24 @@ export function TabNavItem(props: {
           }}
           data-slot="tab-title"
           data-titlebar-tab-title
+          draggable={!!props.session && !editing()}
+          onDragStart={(event) => {
+            if (!props.session || editing()) { event.preventDefault(); return }
+            setGesture("dragged", true)
+            startSessionReferenceDrag(event, props.server, props.session)
+            const key = tabRoot.closest("[data-tab-key]")?.getAttribute("data-tab-key")
+            if (event.dataTransfer && key) {
+              event.dataTransfer.setData(SESSION_TAB_DRAG_MIME, key)
+              event.dataTransfer.effectAllowed = "copyMove"
+            }
+            props.onTitleDragStart?.(event)
+          }}
           dir="auto"
           class="min-w-0 flex-1 outline-none leading-4"
           classList={{
             "overflow-hidden text-clip whitespace-nowrap": !editing(),
             "select-text": editing(),
+            "cursor-grab active:cursor-grabbing [-webkit-user-drag:element]": !!props.session && !editing(),
           }}
           contenteditable={editing() ? true : undefined}
           onDblClick={openRename}
@@ -402,6 +442,33 @@ export function TabNavItem(props: {
           <Menu.Item disabled={!props.session || rename.isPending} onSelect={() => setMenu("rename", true)}>
             {language.t("common.rename")}
           </Menu.Item>
+          <Menu.Item disabled={!props.session} onSelect={() => props.session && void copySessionID(props.session.id)}>
+            {language.t("command.session.copyID")}
+          </Menu.Item>
+          <Show when={platform.sessionLink}><Menu.Item disabled={!props.session} onSelect={() => {
+            const session = props.session
+            if (session) dialog.show(() => <BranchMailDialog server={props.server} sessionID={session.id} title={session.title ?? session.id} />)
+          }}>{language.t("branchMail.open")}</Menu.Item></Show>
+          <Show when={props.move}>
+            {(move) => (
+              <Menu.Sub>
+                <Menu.SubTrigger disabled={!props.session || move().projects.length === 0}>
+                  {language.t("sidebar.projects.move")}
+                </Menu.SubTrigger>
+                <Menu.Portal>
+                  <Menu.SubContent>
+                    <For each={move().projects}>
+                      {(project) => (
+                        <Menu.Item onSelect={() => move().select(project.worktree)}>
+                          <bdi dir="auto">{project.name}</bdi>
+                        </Menu.Item>
+                      )}
+                    </For>
+                  </Menu.SubContent>
+                </Menu.Portal>
+              </Menu.Sub>
+            )}
+          </Show>
           <Menu.Item onSelect={props.onClose}>{language.t("common.closeTab")}</Menu.Item>
         </Menu.Context.Content>
       </Menu.Context.Portal>

@@ -57,5 +57,17 @@ export const UpdateInput = Schema.Struct({
 }).annotate({ identifier: "Project.UpdateInput" })
 export interface UpdateInput extends Schema.Schema.Type<typeof UpdateInput> {}
 
+export const FolderName = Schema.String.check(
+  Schema.isPattern(/^[^<>:"/\\|?*\u0000-\u001f]*[^<>:"/\\|?*\u0000-\u001f.\s]$/),
+  Schema.isPattern(/^(?!(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$))/i),
+).pipe(Schema.brand("Project.FolderName")).annotate({ identifier: "Project.FolderName" })
+export type FolderName = typeof FolderName.Type
+
+export const CreateInput = Schema.Struct({
+  parent: AbsolutePath,
+  name: FolderName,
+}).annotate({ identifier: "Project.CreateInput" })
+export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
+
 const Updated = ephemeral({ type: "project.updated", schema: Info.fields })
 export const Event = { Updated, Definitions: inventory(Updated) }

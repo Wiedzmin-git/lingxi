@@ -16,6 +16,7 @@ import { usePlatform } from "@/runtime/platform/platform"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { resolveBlobUrl } from "@/runtime/persistence/drafts"
 import { useData, useServer } from "@/runtime/server/current"
+import { ServerConnection } from "@/runtime/server/registry"
 import { showToast } from "@/shell/notifications/toast"
 import { formatServerError } from "@/runtime/server/errors"
 import { Skill } from "@opencode/schema/skill"
@@ -26,6 +27,7 @@ import { createComposerHistory } from "./history/store"
 import { createComposerSubmit } from "./submit"
 import { useAttachmentDestination } from "./attachments/destination"
 import { parseClientSlashCommand } from "./client-slash-command"
+import { MessageQuoteDialog } from "./message-quote-editor"
 
 export type ComposerModel = ComposerEditorModel & {
   readonly model: ComposerControls["model"]
@@ -305,6 +307,7 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
   })
 
   const controller = createComposerEditor({
+    referenceServer: () => ServerConnection.key(server.conn),
     store: prompt.store,
     state: interaction,
     history: {
@@ -337,6 +340,25 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
       const item = controller.contextItem(key)
 
       if (item?.type === "note") {
+        const quote = item.quote
+
+        if (quote) {
+          const href = item.href
+
+          dialog.show(() =>
+            createComponent(MessageQuoteDialog, {
+              quote,
+              comment: item.comment,
+              onSave: (comment) => prompt.context.updateComment(item.commentID, { comment }),
+              onSource: href
+                ? () => links.open({ href, origin: item.origin, session: extensions.current() })
+                : undefined,
+            }),
+          )
+
+          return
+        }
+
         // The extension that attached the note reveals its subject.
         const href = item.live?.href ?? item.href
 
@@ -413,6 +435,10 @@ export function createComposerModel(adapter: ComposerAdapter, options?: { queue?
         queue: options?.queue,
         onSubmit: (submitOptions) => {
           if (!available()) return
+          if (prompt.current().some((part) => part.type === "session" && part.server !== ServerConnection.key(server.conn))) {
+            showToast({ title: language.t("prompt.toast.branchReferenceServer.title"), description: language.t("prompt.toast.branchReferenceServer.description") })
+            return
+          }
           const queue = options?.queue
 
           if (queue?.undoing()) return

@@ -42,7 +42,7 @@ import { persistedHandle } from "../src/runtime/extension/stores"
 import { LanguageProvider } from "../src/runtime/i18n/language"
 import { GuiExtensionsSettings } from "../src/runtime/extension/settings-page-dev"
 
-export { bindExtension, useExtension, Contract, createKeyed, Panel, Slot, Store } from "@opencode/gui-extensions/sdk"
+export { bindExtension, useExtension, Contract, createKeyed, LinkHandler, Panel, Slot, Store } from "@opencode/gui-extensions/sdk"
 
 export { Schema }
 

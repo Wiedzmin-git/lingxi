@@ -1,0 +1,51 @@
+{
+  "$schema": "https://opencode.ai/desktop-theme.json",
+  "name": "GraphiteSoft",
+  "id": "graphite-soft",
+  "light": {
+    "palette": {
+      "neutral": "#f5f6f7",
+      "ink": "#28323b",
+      "primary": "#526b80",
+      "success": "#397954",
+      "warning": "#946b31",
+      "error": "#a94747",
+      "info": "#576d83",
+      "interactive": "#426789",
+      "diffAdd": "#397954",
+      "diffDelete": "#a94747"
+    },
+    "v2Overrides": {
+      "v2-background-bg-user-message": "#e8edf1",
+      "v2-text-text-user-message": "#28323b",
+      "v2-text-text-user-message-mention-prefix": "#426789",
+      "v2-border-border-user-message": "#cbd4dc"
+    }
+  },
+  "dark": {
+    "palette": {
+      "neutral": "#0c1116",
+      "ink": "#d6dce1",
+      "primary": "#93a9bc",
+      "success": "#85b397",
+      "warning": "#c3ad80",
+      "error": "#d39393",
+      "info": "#98aec2",
+      "interactive": "#9ab6cf",
+      "diffAdd": "#85b397",
+      "diffDelete": "#d39393"
+    },
+    "overrides": {
+      "text-strong": "#d6dce1",
+      "text-base": "#bdc7d0",
+      "text-weak": "#8996a2"
+    },
+    "v2Overrides": {
+      "v2-background-bg-base": "#0c1116",
+      "v2-background-bg-user-message": "#20262b",
+      "v2-text-text-user-message": "#d6dce1",
+      "v2-text-text-user-message-mention-prefix": "#9ab6cf",
+      "v2-border-border-user-message": "#303940"
+    }
+  }
+}

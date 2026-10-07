@@ -8,10 +8,34 @@ import { SubagentCompletion } from "./subagent-completion.js"
 type Recovery = Extract<Job.Recovery, { kind: "subagent" }>
 
 interface Runner {
-  start: (recovery: Recovery) => Effect.Effect<Job.Info>
+  start: (recovery: Recovery, awaitResult?: boolean) => Effect.Effect<Job.Info>
   background: (recovery: Recovery) => Effect.Effect<void>
   notify: (recovery: Recovery, startedAt: number) => Effect.Effect<void>
 }
+
+export const run = Effect.fn("SubagentJob.run")(function* (sessions: Session.Interface, jobs: Job.Interface, recovery: Recovery) {
+  return yield* Effect.gen(function* () {
+    yield* sessions.resume(recovery.childSessionID)
+    // A child may yield while its default-background tools run. Explicit
+    // detached tasks do not delay the delegated result (e.g. a persistent server).
+    while (yield* jobs.awaitBackground(recovery.childSessionID)) yield* sessions.wait(recovery.childSessionID)
+    // awaitIdle deliberately suppresses execution failure. Do not select
+    // an earlier successful 'waiting' message after a failed continuation.
+    const outcome = (yield* sessions.get(recovery.childSessionID)).outcome
+    if (outcome === "failed") return yield* Effect.fail(new Error("Subagent continuation failed"))
+    if (outcome === "interrupted") return yield* Effect.interrupt
+    const messages = yield* sessions.messages({ sessionID: recovery.childSessionID, order: "desc", limit: 20 })
+    const assistant = messages.find(
+      (message) => message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
+    )
+    return SubagentCompletion.text(assistant)
+  })
+})
+
+export const cancel = Effect.fn("SubagentJob.cancel")(function* (sessions: Session.Interface, jobs: Job.Interface, recovery: Recovery) {
+  yield* sessions.interrupt(recovery.childSessionID)
+  yield* jobs.cancelBackground(recovery.childSessionID)
+})
 
 export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | Scope.Scope> = Effect.gen(function* () {
   const sessions = yield* Session.Service
@@ -26,7 +50,8 @@ export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | 
     notifications.add(key)
     yield* Effect.gen(function* () {
       const info = (yield* jobs.wait({ id: recovery.childSessionID })).info
-      if (info) yield* SubagentCompletion.deliver(sessions, jobs, { ...info, recovery })
+      if (info) yield* SubagentCompletion.deliver(sessions, jobs, { ...info, recovery,
+        resume: info.status !== "cancelled" || info.metadata?.awaitResult !== true })
     }).pipe(
       Effect.ensuring(Effect.sync(() => notifications.delete(key))),
       Effect.forkIn(scope, { startImmediately: true }),
@@ -34,22 +59,15 @@ export const make: Effect.Effect<Runner, never, Session.Service | Job.Service | 
   })
 
   return {
-    start: (recovery: Recovery) =>
+    start: (recovery: Recovery, awaitResult = false) =>
       jobs.start({
         id: recovery.childSessionID,
         type: "subagent",
         title: recovery.description,
-        metadata: {},
+        metadata: { awaitResult },
         recovery,
-        run: Effect.gen(function* () {
-          yield* sessions.resume(recovery.childSessionID)
-          const messages = yield* sessions.messages({ sessionID: recovery.childSessionID, order: "desc", limit: 20 })
-          const assistant = messages.find(
-            (message) =>
-              message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
-          )
-          return SubagentCompletion.text(assistant)
-        }),
+        run: run(sessions, jobs, recovery),
+        onCancel: cancel(sessions, jobs, recovery),
       }),
     background: Effect.fn("SubagentJob.background")(function* (recovery: Recovery) {
       const info = yield* jobs.background(recovery.childSessionID)

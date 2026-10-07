@@ -84,9 +84,14 @@ test("a settings page survives refresh", async ({ page }) => {
   const appearance = settings.getByRole("tab", { name: "Appearance", exact: true })
   await appearance.click()
   await expect(page).toHaveURL("/settings?tab=appearance")
+  const timestamps = settings.getByRole("switch", { name: "Message date and time", exact: true })
+  await expect(timestamps).toBeChecked()
+  await timestamps.press("Space")
+  await expect(timestamps).not.toBeChecked()
   await page.reload()
   await expect(appearance).toHaveAttribute("aria-selected", "true")
   await expect(page).toHaveURL("/settings?tab=appearance")
+  await expect(timestamps).not.toBeChecked()
 })
 
 test("another server's settings page survives refresh", async ({ page }) => {

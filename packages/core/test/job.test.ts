@@ -110,6 +110,37 @@ describe("Job", () => {
     }),
   )
 
+  it.live("a required continuation adopts running detached work without restarting or later detaching it", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const output = yield* Deferred.make<string>()
+      const parent = SessionSchema.ID.make("ses_required_continuation_owner")
+      const recovery = { kind: "subagent" as const, parentSessionID: parent,
+        childSessionID: SessionSchema.ID.make("ses_required_continuation_child"), agent: "reviewer", description: "review" }
+      const job = yield* jobs.start({ id: recovery.childSessionID, type: "subagent", recovery,
+        metadata: { awaitResult: false }, run: Deferred.await(output) })
+      yield* jobs.background(job.id)
+      expect(yield* jobs.awaitBackground(parent)).toBe(false)
+      yield* jobs.cancelBackground(parent)
+      expect((yield* jobs.get(job.id))?.status).toBe("running")
+      yield* jobs.start({ id: job.id, type: "subagent", recovery, metadata: { awaitResult: true },
+        run: Effect.die("Continuation must join the running generation") })
+      expect((yield* jobs.pendingBackground).find((item) => item.id === job.id)?.awaitResult).toBe(true)
+      yield* jobs.start({ id: job.id, type: "subagent", recovery, metadata: { awaitResult: false },
+        run: Effect.die("Continuation must not detach required work") })
+      const waiting = yield* jobs.awaitBackground(parent).pipe(Effect.forkScoped({ startImmediately: true }))
+      expect(waiting.pollUnsafe()).toBeUndefined()
+      yield* jobs.cancelBackground(SessionSchema.ID.make("ses_other_owner"))
+      expect((yield* jobs.get(job.id))?.status).toBe("running")
+      yield* jobs.cancelBackground(parent)
+      const cancelled = yield* jobs.get(job.id)
+      expect(cancelled?.status).toBe("cancelled")
+      if (!cancelled?.notificationID) return yield* Effect.die("Expected cancellation notification identity")
+      yield* jobs.completeBackground(cancelled.notificationID)
+      expect(yield* Fiber.join(waiting)).toBe(true)
+    }),
+  )
+
   it.live("ignores an obsolete callback after a cancellation waiter starts a same-ID replacement", () =>
     Effect.gen(function* () {
       const jobs = yield* Job.Service
@@ -260,6 +291,7 @@ describe("Job", () => {
       const job = yield* jobs.start({
         id: recovery.shellID,
         type: "shell",
+        metadata: { awaitResult: true },
         recovery,
         run: Deferred.await(latch).pipe(Effect.as("done")),
       })
@@ -271,9 +303,12 @@ describe("Job", () => {
       expect(running).toMatchObject({ id: job.id, recovery, status: "running" })
       expect(running?.notificationID).toStartWith("msg_")
       expect(background?.notificationID).toBe(running?.notificationID)
+      const admitted = yield* jobs.awaitBackground(recovery.sessionID).pipe(Effect.forkScoped({ startImmediately: true }))
+      expect(yield* jobs.awaitBackground(SessionSchema.ID.make("ses_other_owner"))).toBe(false)
 
       yield* Deferred.succeed(latch, undefined)
       yield* jobs.wait({ id: job.id })
+      expect(admitted.pollUnsafe()).toBeUndefined()
 
       const completed = (yield* jobs.pendingBackground).find((item) => item.id === job.id)
       expect(completed).toMatchObject({
@@ -286,7 +321,9 @@ describe("Job", () => {
       if (!completed) return yield* Effect.die("background marker missing")
 
       yield* jobs.completeBackground(completed.notificationID)
+      expect(yield* Fiber.join(admitted)).toBe(true)
       expect((yield* jobs.pendingBackground).find((item) => item.id === job.id)).toBeUndefined()
+      expect(yield* jobs.awaitBackground(recovery.sessionID)).toBe(false)
     }),
   )
 

@@ -29,10 +29,6 @@ type SessionCommandSource = {
 export type SessionCommandContext = {
   session: SessionCommandSource
   region: Region
-  background: {
-    blocking: () => boolean
-    move: () => Promise<void>
-  }
   navigateMessageByOffset: (offset: number) => void
   revert: Pick<SessionRevert, "undo" | "redo">
   focusInput: () => void
@@ -294,13 +290,6 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       slash: "compact",
       disabled: !actions.session.identity.params.id || actions.session.history.visibleUserMessages().length === 0,
       onSelect: compact,
-    }),
-    sessionCommand({
-      id: "session.background",
-      title: language.t("command.session.background"),
-      keybind: "ctrl+b",
-      disabled: !actions.background.blocking(),
-      onSelect: actions.background.move,
     }),
     sessionCommand({
       id: "session.fork",

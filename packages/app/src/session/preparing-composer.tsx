@@ -44,7 +44,7 @@ export function PreparingComposer(props: { pending: PendingSession }) {
 
   return (
     <div data-component="session-composer-dock" class="w-full shrink-0 bg-v2-background-bg-base pb-3">
-      <div class="mx-auto w-full max-w-[1000px] px-3">
+      <div class="mx-auto w-full max-w-[var(--session-content-width,1000px)] px-3">
         <ComposerEditor controller={editor} modelControlsVisible={false} />
       </div>
     </div>

@@ -104,6 +104,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       reload: () => Effect.die("unused mcp.reload"),
     },
     permission: overrides.permission ?? {
+      authorizeRead: () => Effect.die("unused permission.authorizeRead"),
       hook: () => Effect.die("unused permission.hook"),
       list: () => Effect.die("unused permission.list"),
       get: () => Effect.die("unused permission.get"),

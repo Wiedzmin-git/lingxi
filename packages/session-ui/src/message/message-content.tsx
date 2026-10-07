@@ -13,6 +13,7 @@ import { Tooltip } from "@opencode/ui/tooltip"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Icon } from "@opencode/ui/icon"
 import { Button } from "@opencode/ui/button"
+import { Collapsible } from "@opencode/ui/collapsible"
 import { TextReveal } from "@opencode/ui/text-reveal"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { BasicTool } from "../components/basic-tool"
@@ -26,7 +27,7 @@ import type {
   SessionMessageCompaction,
   SessionMessageUser,
 } from "@opencode/client/promise"
-import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserAttachmentReference, SessionUserBranchReference, SessionUserComment } from "../actions"
 import { attached, typeLabel } from "../components/message-file"
 
 export async function writeClipboard(text: string): Promise<boolean> {
@@ -214,7 +215,11 @@ function PacedMarkdown(props: { text: string; cacheKey: string; streaming: boole
   )
 }
 
-function UserMessageComments(props: { comments: SessionUserComment[]; bounded: boolean }) {
+function UserMessageComments(props: {
+  comments: SessionUserComment[]
+  bounded: boolean
+  onQuote?: SessionUserActions["openQuote"]
+}) {
   const i18n = useI18n()
   const [state, setState] = createStore({ expanded: false })
   const comments = createMemo(() => (props.bounded && !state.expanded ? props.comments.slice(0, 5) : props.comments))
@@ -231,6 +236,14 @@ function UserMessageComments(props: { comments: SessionUserComment[]; bounded: b
                 : { type: "file", path: comment.path, selection: comment.selection }
             }
             title={comment.comment}
+            preview={comment.type === "note" ? comment.quote?.text : undefined}
+            onClick={
+              comment.type === "note" && comment.quote && props.onQuote
+                ? () => {
+                    if (comment.type === "note" && comment.quote) props.onQuote?.(comment.quote, comment.comment)
+                  }
+                : undefined
+            }
             tooltip
             wide
           />
@@ -254,6 +267,8 @@ export function CurrentUserMessageDisplay(props: {
   actions?: SessionUserActions
   comments?: SessionUserComment[]
   references?: SessionUserAttachmentReference[]
+  sessionReferences?: SessionUserBranchReference[]
+  showDateTime?: boolean
 }) {
   const data = useData()
   const dialog = useDialog()
@@ -349,20 +364,26 @@ export function CurrentUserMessageDisplay(props: {
   )
 
   return (
-    <div data-component="user-message" data-timeline-part-id={props.text ? `${props.message.id}:text:0` : undefined}>
+    <div
+      data-component="user-message"
+      data-quote-message-id={props.message.id}
+      data-timeline-part-id={props.text ? `${props.message.id}:text:0` : undefined}
+    >
       <Show
         when={props.text}
         fallback={
           <Show when={comments().length > 0}>
-            <UserMessageComments comments={comments()} bounded={false} />
+            <UserMessageComments comments={comments()} bounded={false} onQuote={props.actions?.openQuote} />
           </Show>
         }
       >
         <div data-slot="user-message-body">
           <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />
+            <span data-slot="user-message-content">
+              <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} sessions={props.sessionReferences} />
+            </span>
             <Show when={comments().length > 0}>
-              <UserMessageComments comments={comments()} bounded />
+              <UserMessageComments comments={comments()} bounded onQuote={props.actions?.openQuote} />
             </Show>
           </div>
         </div>
@@ -377,14 +398,16 @@ export function CurrentUserMessageDisplay(props: {
                 {metaHead()}
               </span>
             </Show>
-            <Show when={metaHead() && stamp()}>
+            <Show when={!props.showDateTime && metaHead() && stamp()}>
               <span data-slot="user-message-meta-sep" class="text-12-regular text-text-weak cursor-default">
                 {"\u00A0\u00B7\u00A0"}
               </span>
             </Show>
-            <span data-slot="user-message-meta-tail" class="text-12-regular text-text-weak cursor-default">
-              {stamp()}
-            </span>
+            <Show when={!props.showDateTime}>
+              <span data-slot="user-message-meta-tail" class="text-12-regular text-text-weak cursor-default">
+                {stamp()}
+              </span>
+            </Show>
           </span>
           <Show when={pending()}>
             <MessageActionButton
@@ -445,6 +468,7 @@ function CurrentHighlightedText(props: {
   text: string
   files: PromptFileAttachment[]
   agents: PromptAgentAttachment[]
+  sessions?: SessionUserBranchReference[]
 }) {
   const segments = createMemo(() => {
     const references = [
@@ -454,6 +478,7 @@ function CurrentHighlightedText(props: {
       ...props.agents.flatMap((agent) =>
         agent.mention ? [{ start: agent.mention.start, end: agent.mention.end, type: "agent" as const }] : [],
       ),
+      ...(props.sessions ?? []).map((reference) => ({ ...reference, type: "session" as const })),
     ].sort((a, b) => a.start - b.start)
 
     const result: HighlightSegment[] = []
@@ -462,7 +487,8 @@ function CurrentHighlightedText(props: {
       if (reference.start < last) return
 
       if (reference.start > last) result.push({ text: props.text.slice(last, reference.start) })
-      result.push({ text: props.text.slice(reference.start, reference.end), type: reference.type })
+      result.push({ text: props.text.slice(reference.start, reference.end), type: reference.type,
+        sessionID: "sessionID" in reference ? reference.sessionID : undefined })
       last = reference.end
     })
 
@@ -474,7 +500,7 @@ function CurrentHighlightedText(props: {
   return (
     <For each={segments()}>
       {(segment) => (
-        <span data-highlight={segment.type}>
+        <span data-highlight={segment.type} title={segment.sessionID}>
           <Show when={segment.type && segment.text.startsWith("@")} fallback={segment.text}>
             <span data-slot="user-message-mention-prefix">@</span>
             {segment.text.slice(1)}
@@ -485,7 +511,7 @@ function CurrentHighlightedText(props: {
   )
 }
 
-type HighlightSegment = { text: string; type?: "file" | "agent" }
+type HighlightSegment = { text: string; type?: "file" | "agent" | "session"; sessionID?: string }
 
 /** A compaction the server admitted but has not started, drawn as the divider a started one opens with. */
 export function SessionCompactionQueued() {
@@ -506,7 +532,12 @@ function CompactionDivider(props: { label: string }) {
   )
 }
 
-export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
+export function SessionCompactionMessage(props: {
+  message: SessionMessageCompaction
+  error: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const i18n = useI18n()
   const summary = () => (props.message.status === "failed" ? "" : props.message.summary)
 
@@ -555,16 +586,35 @@ export function SessionCompactionMessage(props: { message: SessionMessageCompact
   return (
     <div data-component="session-compaction-message">
       <CompactionDivider label={i18n.t("ui.messagePart.compaction.started")} />
-      <Show when={summary().trim()}>
-        <div data-component="text-part" data-timeline-part-id={props.message.id}>
-          <div data-slot="text-part-body">
-            <PacedMarkdown
-              text={summary()}
-              cacheKey={props.message.id}
-              streaming={props.message.status === "running"}
-            />
-          </div>
-        </div>
+      <Show when={props.message.status === "running" || summary().trim()}>
+        <Collapsible open={props.open} onOpenChange={props.onOpenChange} variant="ghost" class="compaction-summary">
+          <Collapsible.Trigger
+            aria-label={i18n.t(
+              props.open ? "ui.messagePart.compaction.hideSummary" : "ui.messagePart.compaction.showSummary",
+            )}
+            title={i18n.t(
+              props.open ? "ui.messagePart.compaction.hideSummary" : "ui.messagePart.compaction.showSummary",
+            )}
+          >
+            <span aria-hidden="true" class="inline-flex w-6 shrink-0 justify-center text-16-regular">
+              {props.open ? "−" : "+"}
+            </span>
+            <span>{i18n.t("ui.messagePart.compaction.summary")}</span>
+          </Collapsible.Trigger>
+          <Collapsible.Content>
+            <Show when={props.open && summary().trim()}>
+              <div data-component="text-part" data-timeline-part-id={props.message.id}>
+                <div data-slot="text-part-body">
+                  <PacedMarkdown
+                    text={summary()}
+                    cacheKey={props.message.id}
+                    streaming={props.message.status === "running"}
+                  />
+                </div>
+              </div>
+            </Show>
+          </Collapsible.Content>
+        </Collapsible>
       </Show>
       <Show when={props.message.status === "running"}>
         <div role="status" class="py-2">
@@ -656,7 +706,7 @@ export function AssistantTextContent(props: {
 
   return (
     <Show when={props.text}>
-      <div data-component="text-part" data-timeline-part-id={props.id}>
+      <div data-component="text-part" data-quote-message-id={props.message.id} data-timeline-part-id={props.id}>
         <div data-slot="text-part-body">
           <PacedMarkdown text={props.text} cacheKey={props.id} streaming={props.message.time.completed === undefined} />
         </div>

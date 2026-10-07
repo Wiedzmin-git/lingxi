@@ -1,13 +1,10 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, on, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Predicate } from "effect"
-import { createAnimatedPresence } from "@/runtime/animated-presence"
 import type { SessionUserActions } from "@opencode/session-ui/actions"
-import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { InlineInput } from "@opencode/ui/inline-input"
-import { Keybind } from "@opencode/ui/keybind"
 import { Menu } from "@opencode/ui/menu"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import type { BackgroundTask, MountedSession, SessionScreen } from "@opencode/gui-extensions/sdk"
@@ -23,44 +20,20 @@ import { createTimelineVirtualizer } from "./virtualizer"
 import { containsDirectory } from "@opencode/util/path"
 import { isWorkspaceDirectory } from "@/workspaces/paths"
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
-import { useCommand } from "@/shell/commands/command"
 import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeaderSpacer } from "@/session/header/session-header"
 import { SessionRunningMenu } from "@/session/header/session-running-menu"
+import { useSettings } from "@/settings/model"
 
 type BlockingTask = { type: "shell" | "subagent"; partID: string; id?: string; label?: string }
 
 type SessionBackground = {
-  blocking: Accessor<BlockingTask[]>
   tasks: Accessor<readonly BackgroundTask[]>
   running: {
     sessionID: Accessor<string | undefined>
     blocking: Accessor<BlockingTask[]>
     tasks: Accessor<readonly BackgroundTask[]>
   }
-  move: () => Promise<void>
-}
-
-export function BackgroundMoveHint(props: { keybind?: string[]; onMove?: () => void }) {
-  const language = useLanguage()
-  const command = useCommand()
-  const keys = () => props.keybind ?? command.keybindParts("session.background")
-  const keybind = () => props.keybind?.join("+") ?? command.keybind("session.background")
-
-  return (
-    <Button
-      data-component="session-background-hint"
-      type="button"
-      variant="ghost-faint"
-      size="small"
-      class="max-w-full"
-      aria-label={language.t("session.background.moveInline", { keybind: keybind() })}
-      onClick={() => props.onMove?.()}
-    >
-      <span class="min-w-0 truncate">{language.t("session.background.moveRunning")}</span>
-      <Keybind keys={keys()} variant="neutral" />
-    </Button>
-  )
 }
 
 type MessageTimelineProps = {
@@ -124,6 +97,7 @@ function MessageTimelineView(
 ) {
   const language = useLanguage()
   const server = useServer()
+  const settings = useSettings()
   const data = server.ctx.data
   const sdk = useWorkspaceLocation()
   const sessionID = props.data.sessionID
@@ -297,6 +271,7 @@ function MessageTimelineView(
         displayText: value?.displayText,
         comments: value?.comments ?? (parsed ? [parsed] : []),
         references: value?.attachments,
+        sessionReferences: value?.sessionReferences,
       }
     },
     actions: props.actions,
@@ -304,33 +279,12 @@ function MessageTimelineView(
     shellToolDefaultOpen: props.data.shellToolPartsExpanded,
     editToolDefaultOpen: props.data.editToolPartsExpanded,
     timelineDetail: props.data.timelineDetail,
+    showMessageTimestamps: settings.appearance.messageTimestamps,
     disclosure: virtualized.disclosure,
     centered: () => props.centered,
     padding: turnPadding,
     anchor: props.anchor,
   })
-
-  const backgroundHintPartID = createMemo(() => {
-    const blocking = new Set(props.background.blocking().map((task) => task.partID))
-
-    if (blocking.size === 0) return
-
-    return projection
-      .rows()
-      .flatMap((row) =>
-        Predicate.isTagged(row, "AssistantPart") ? (row.group.type === "part" ? [row.group.ref] : row.group.refs) : [],
-      )
-      .findLast((ref) => blocking.has(ref.partID))?.partID
-  })
-
-  const [backgroundHintRef, setBackgroundHintRef] = createSignal<HTMLDivElement>()
-
-  const backgroundHintPresence = createAnimatedPresence(
-    backgroundHintPartID,
-    () => backgroundHintRef() ?? null,
-    sessionID,
-    1000,
-  )
 
   const showWorking = createMemo(() => {
     const id = sessionID()
@@ -394,35 +348,19 @@ function MessageTimelineView(
     <VirtualizedTimeline
       workspaceSession={workspaceSession}
       bottomSpacer={
-        <Show when={showWorking() || backgroundHintPresence.present()}>
+        <Show when={showWorking()}>
           <div
             classList={{
               "min-w-0 w-full max-w-full": true,
-              "md:max-w-[1000px] md:mx-auto": props.centered,
+              "md:max-w-[var(--session-content-width,1000px)] md:mx-auto": props.centered,
             }}
           >
             <div
               class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}
             >
-              <Show when={showWorking()}>
-                <div data-component="session-working" role="status">
-                  <TextShimmer text={language.t("session.timeline.working")} active />
-                </div>
-              </Show>
-              <Show when={backgroundHintPresence.present()}>
-                <div
-                  ref={setBackgroundHintRef}
-                  data-component="session-background-hint-row"
-                  class="duration-150 motion-reduce:animate-none"
-                  classList={{
-                    "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
-                    "animate-out fade-out fill-mode-forwards":
-                      backgroundHintPresence.animate() && !backgroundHintPresence.show(),
-                  }}
-                >
-                  <BackgroundMoveHint onMove={props.background.move} />
-                </div>
-              </Show>
+              <div data-component="session-working" role="status">
+                <TextShimmer text={language.t("session.timeline.working")} active />
+              </div>
             </div>
           </div>
         </Show>

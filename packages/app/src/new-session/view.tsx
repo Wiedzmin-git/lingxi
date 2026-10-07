@@ -56,7 +56,8 @@ export function NewSessionView(props: {
         class="relative flex-1 min-h-0 overflow-hidden rounded-[10px] bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]"
       >
         <ComposerDropzone
-          active={props.composer.state.drag === "active"}
+          active={props.composer.state.drag !== "idle"}
+          reference={props.composer.state.drag === "reference"}
           input={props.composer.model.selection.current()?.capabilities.input}
         />
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">

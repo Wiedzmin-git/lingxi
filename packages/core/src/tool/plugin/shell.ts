@@ -40,8 +40,10 @@ const description = (shell?: string) =>
     "Prefer dedicated tools over shell commands when possible.",
     "When output is large, the full result is saved to a file and a truncated preview is returned.",
     "Rely on automatic truncation unless filtering the output is more useful.",
-    "Commands accept an optional timeout, background commands have no timeout by default.",
-    "Background commands return immediately, and you will be notified when they complete.",
+    "Commands run in the background by default and return immediately; their actual output is delivered automatically on completion.",
+    `Commands accept an optional timeout, defaulting to ${DEFAULT_TIMEOUT_MS} milliseconds. Explicit background=true retains the no-timeout default for persistent commands.`,
+    "Launch dependent work only after the completion notification, not after the launch receipt. Independent work may run in parallel.",
+    "Use background=false only when an immediate tool result is required. Do not poll for background completion.",
   ].join(" ")
 
 export const Input = Schema.Struct({
@@ -51,11 +53,11 @@ export const Input = Schema.Struct({
       "Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead.",
   }),
   timeout: Schema.optionalKey(NonNegativeInt).annotate({
-    description: `Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to ${DEFAULT_TIMEOUT_MS} for foreground commands. Background commands have no timeout by default.`,
+    description: `Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to ${DEFAULT_TIMEOUT_MS}; explicitly setting background=true keeps the legacy no-timeout default.`,
   }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
-      "Run the command in the background and return immediately (useful for dev servers and long-running builds). You do not need to use '&' at the end of the command when using this parameter. You will be notified when it completes. DO NOT poll for completion.",
+      "Background execution is the default, including short commands. Set false only when an immediate tool result is required. Explicit true defaults to no timeout for persistent commands. You will be notified when background work completes; start dependent work after that notification. DO NOT poll for completion.",
   }),
 })
 
@@ -171,6 +173,7 @@ export const Plugin = {
           ...(info.notificationID ? { id: info.notificationID } : {}),
           sessionID,
           description: command,
+          resume: info.status !== "cancelled" || info.metadata?.awaitResult !== true,
           ...ShellResult.notification({
             jobID: id,
             shellID,
@@ -238,7 +241,7 @@ export const Plugin = {
                 id: info.id,
                 type: name,
                 title: info.command,
-                metadata: { sessionID: context.sessionID, shellID: info.id },
+                metadata: { sessionID: context.sessionID, shellID: info.id, awaitResult: input.background === undefined },
                 recovery: {
                   kind: "shell",
                   sessionID: context.sessionID,
@@ -248,7 +251,7 @@ export const Plugin = {
                 run,
               })
 
-              if (input.background === true) {
+              if (input.background !== false) {
                 yield* jobs.background(job.id)
                 yield* notifyWhenDone(context.sessionID, job.id, info.id, info.command, settled)
                 return backgroundResult(info.id, info.file)

@@ -60,7 +60,7 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
     )
   })
 
-  const idle = (outcome: SessionMessage.Idle["outcome"]) =>
+  const idle = (outcome: SessionMessage.Idle["outcome"], executionID?: string) =>
     clearCurrentRetry.pipe(
       Effect.andThen(
         adapter.appendMessage(
@@ -68,7 +68,7 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
             id: SessionMessage.ID.fromEvent(event.id),
             type: "idle",
             outcome,
-            metadata: event.metadata,
+            metadata: executionID ? { ...event.metadata, executionID } : event.metadata,
             time: { created },
           }),
         ),
@@ -140,11 +140,11 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
       "session.inbox.cancelled": () => Effect.void,
       "session.inbox.delivery.changed": () => Effect.void,
       "session.execution.started": () => Effect.void,
-      "session.execution.succeeded": () => idle("succeeded"),
-      "session.execution.failed": () => idle("failed"),
+      "session.execution.succeeded": (event) => idle("succeeded", event.data.executionID),
+      "session.execution.failed": (event) => idle("failed", event.data.executionID),
       // Shutdown keeps the execution claim and the resumed drain continues the turn.
       "session.execution.interrupted": (event) =>
-        event.data.reason === "shutdown" ? clearCurrentRetry : idle("interrupted"),
+        event.data.reason === "shutdown" ? clearCurrentRetry : idle("interrupted", event.data.executionID),
       "session.instructions.updated": (event) => {
         if (event.data.text === undefined) return Effect.void
         return adapter.appendMessage(
@@ -227,6 +227,9 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
                 draft.time.created = DateTime.makeUnsafe(event.data.started)
                 draft.time.streamed = undefined
                 draft.time.completed = undefined
+                if (event.data.inputMessageIDs) draft.metadata = { ...draft.metadata, requestMessageIDs: Array.from(event.data.inputMessageIDs),
+                  requestAttempts: [...(Array.isArray(draft.metadata?.requestAttempts) ? draft.metadata.requestAttempts.filter((attempt) => attempt.id !== event.id) : []),
+                    { id: event.id, started: event.data.started, executionID: event.data.executionID, inputMessageIDs: Array.from(event.data.inputMessageIDs) }] }
                 if (event.data.snapshot) draft.snapshot = { ...draft.snapshot, start: event.data.snapshot }
               }),
             )
@@ -247,7 +250,8 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
               type: "assistant",
               agent: event.data.agent,
               model: event.data.model,
-              metadata: event.metadata,
+              metadata: event.data.inputMessageIDs ? { ...event.metadata, requestMessageIDs: Array.from(event.data.inputMessageIDs),
+                requestAttempts: [{ id: event.id, started: event.data.started, executionID: event.data.executionID, inputMessageIDs: Array.from(event.data.inputMessageIDs) }] } : event.metadata,
               time: { created: DateTime.makeUnsafe(event.data.started) },
               content: [],
               snapshot: event.data.snapshot ? { start: event.data.snapshot } : undefined,

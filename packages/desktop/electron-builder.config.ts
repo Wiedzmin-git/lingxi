@@ -95,6 +95,7 @@ const getBase = (appId: string): Configuration => ({
       to: "",
       filter: ["opencode-cli", "opencode-cli.exe", "opencode-cli.version"],
     },
+    { from: "resources/session-link", to: "session-link", filter: ["package.json", "index.js", "src/**/*.mjs", "scripts/owner.mjs"] },
   ],
   afterPack: async (context) => {
     const cli = path.join(

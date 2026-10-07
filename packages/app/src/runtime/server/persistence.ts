@@ -33,6 +33,7 @@ const ProjectList = Persistence.array(
   Persistence.struct({
     worktree: Schema.String,
     expanded: Persistence.fallback(Schema.Boolean, () => true),
+    pinned: Persistence.optional(Schema.Boolean),
   }),
 )
 

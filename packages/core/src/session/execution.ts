@@ -13,6 +13,8 @@ import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
 import { toSessionError } from "./to-session-error.js"
 import { SessionInbox } from "./inbox.js"
+import { Event } from "@opencode/schema/event"
+import { CurrentExecution } from "./execution-witness.js"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
@@ -84,6 +86,7 @@ export const layer = Layer.effect(
     const releaseOnCommit = (sessionID: SessionSchema.ID) => ({
       commit: () => store.release(sessionID),
     })
+    const executionIDs = new Map<SessionSchema.ID, Event.ID>()
     const drain = Effect.fnUntraced(function* (
       sessionID: SessionSchema.ID,
       force: boolean,
@@ -96,6 +99,7 @@ export const layer = Layer.effect(
         runner.drain({ sessionID, force, continuation, promotable }),
       ).pipe(
         instances.provide(session),
+        Effect.provideService(CurrentExecution, executionIDs.get(sessionID)),
         Effect.tapCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
@@ -112,7 +116,11 @@ export const layer = Layer.effect(
       started: (sessionID) =>
         reportLifecycle(
           sessionID,
-          bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
+          Effect.gen(function* () {
+            const executionID = Event.ID.create()
+            executionIDs.set(sessionID, executionID)
+            yield* bus.publish(SessionEvent.Execution.Started, { sessionID, executionID }, claimOnCommit(sessionID))
+          }),
         ),
       drain: (sessionID, force, promotable) => drain(sessionID, force, undefined, promotable),
       // One terminal observation per busy period, covering every coalesced drain.
@@ -121,16 +129,20 @@ export const layer = Layer.effect(
           sessionID,
           Effect.gen(function* () {
             const outcome = terminal(exit, reason)
+            const executionID = executionIDs.get(sessionID)
             if (outcome.type === "succeeded") {
-              yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID }, releaseOnCommit(sessionID))
+              yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID, executionID }, releaseOnCommit(sessionID))
               return
             }
             if (outcome.type === "interrupted") {
               // Deliberate stops release the claim; shutdown keeps it for restart continuity.
-              if (outcome.reason !== "shutdown") yield* jobs.cancel(sessionID)
+              if (outcome.reason !== "shutdown") {
+                yield* jobs.cancelBackground(sessionID)
+                yield* jobs.cancel(sessionID)
+              }
               yield* bus.publish(
                 SessionEvent.Execution.Interrupted,
-                { sessionID, reason: outcome.reason },
+                { sessionID, executionID, reason: outcome.reason },
                 outcome.reason === "shutdown" ? undefined : releaseOnCommit(sessionID),
               )
               return
@@ -140,10 +152,11 @@ export const layer = Layer.effect(
               {
                 sessionID,
                 error: outcome.error,
+                executionID,
               },
               releaseOnCommit(sessionID),
             )
-          }),
+          }).pipe(Effect.ensuring(Effect.sync(() => executionIDs.delete(sessionID)))),
         ),
     })
 

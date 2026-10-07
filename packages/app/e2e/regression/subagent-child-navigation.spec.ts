@@ -38,7 +38,7 @@ test("navigates to a subagent child session missing from the session list", asyn
   await Promise.all([expect(page).toHaveURL(sessionHref(parentID)), expectSessionTitle(page, parentTitle)])
 })
 
-test("navigates from a running subagent card and hides background controls in the child", async ({ page }) => {
+test("navigates from a running subagent card to the exact child", async ({ page }) => {
   const runningChildID = "ses_running_child"
   await setupTimeline(page, {
     settings: { timelineDetail: { ...timelinePresets[2].value, subagents: { placement: "separate" } } },
@@ -68,11 +68,12 @@ test("navigates from a running subagent card and hides background controls in th
     sessions: [session(), session({ id: runningChildID, parentID: sessionID, title: "Sleep for 5 minutes" })],
     sessionStatus: { [sessionID]: { type: "busy" }, [runningChildID]: { type: "busy" } },
   })
-  const hint = page.getByRole("button", { name: /move running work to the background/i })
-  await expect(hint).toBeVisible()
-  await page.locator('[data-component="task-tool-card"]').click()
+  // Manual-background UI is covered by the timeline keeper. Navigation still
+  // requires the actual running card to be ready before entering its child.
+  const card = page.locator('[data-component="task-tool-card"]')
+  await expect(card).toContainText("Inspect code")
+  await card.click()
   await expect(page).toHaveURL(new RegExp(`/session/${runningChildID}$`))
-  await expect(hint).toHaveCount(0)
 })
 
 test("opens a directly linked nested subagent in its root session tab", async ({ page }) => {

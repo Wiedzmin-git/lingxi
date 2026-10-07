@@ -22,9 +22,17 @@ export function AttachmentCard(props: {
       data-wide={props.wide ? "true" : undefined}
       data-surface={props.surface}
       title={props.hover}
+      role={props.clickable ? "button" : undefined}
+      tabIndex={props.clickable ? 0 : undefined}
+      aria-label={props.clickable ? props.title : undefined}
       onClick={() => props.onClick?.()}
+      onKeyDown={(event) => {
+        if (!props.clickable || (event.key !== "Enter" && event.key !== " ")) return
+        event.preventDefault()
+        props.onClick?.()
+      }}
     >
-      <span ref={(element) => props.titleRef?.(element)} data-slot="attachment-card-title">
+      <span dir="auto" ref={(element) => props.titleRef?.(element)} data-slot="attachment-card-title">
         {props.title}
       </span>
       <span data-slot="attachment-card-subtitle">{props.children}</span>

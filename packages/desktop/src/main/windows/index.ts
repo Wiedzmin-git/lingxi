@@ -166,14 +166,20 @@ export const makeMainWindows = Effect.fn("Window.make")(function* () {
     }
     if (early) {
       focusForTests()
-      runFork(Effect.logInfo("main window visible", { window: id, shownAt: early.shownAt }))
+      runFork(
+        Effect.logInfo("main window initialized", {
+          window: id,
+          visible: early.shownAt !== undefined,
+          shownAt: early.shownAt,
+        }),
+      )
     }
     const reveal = () => {
       if (!contentReady || !appliedTheme || revealed || win.isDestroyed()) return
       revealed = true
-      win.show()
+      if (!app.commandLine.hasSwitch("start-hidden")) win.show()
       focusForTests()
-      runFork(Effect.logInfo("main window visible", { window: id }))
+      runFork(Effect.logInfo("main window ready", { window: id, visible: !app.commandLine.hasSwitch("start-hidden") }))
     }
     const ready = () => {
       contentReady = true
@@ -210,5 +216,3 @@ export const makeMainWindows = Effect.fn("Window.make")(function* () {
 
   return { create, restore }
 })
-
-

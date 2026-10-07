@@ -7,6 +7,7 @@ import type { ComposerPrompt } from "../types"
 import type { ImageAttachmentPart, PathAttachmentPart } from "../state"
 import type { AttachmentDestination } from "./destination"
 import { uploads } from "./uploads"
+import { SESSION_REFERENCE_MIME } from "../session-reference"
 
 type PromptTarget = {
   current: () => ComposerPrompt
@@ -37,7 +38,7 @@ export function createComposerAttachments(
     editor: () => HTMLElement | undefined
     focusEditor: () => void
     addPart: (part: ComposerPrompt[number]) => boolean
-    setDraggingType: (type: "image" | "@mention" | null) => void
+    setDraggingType: (type: "image" | "@mention" | "reference" | null) => void
   },
 ) {
   const clearDrag = () => {
@@ -180,7 +181,8 @@ export function createComposerAttachments(
     makeEventListener(document, "dragover", (event) => {
       if (input.isDialogActive()) return
       event.preventDefault()
-      if (event.dataTransfer?.types.includes("Files")) input.setDraggingType("image")
+      if (event.dataTransfer?.types.includes(SESSION_REFERENCE_MIME)) input.setDraggingType("reference")
+      else if (event.dataTransfer?.types.includes("Files")) input.setDraggingType("image")
       else if (event.dataTransfer?.types.includes("text/plain")) input.setDraggingType("@mention")
     })
     makeEventListener(document, "dragleave", (event) => {
@@ -190,6 +192,7 @@ export function createComposerAttachments(
       if (event.key === "Escape") clearDrag()
     })
     makeEventListener(document, "drop", handleDrop)
+    makeEventListener(document, "dragend", clearDrag)
   })
 
   return {

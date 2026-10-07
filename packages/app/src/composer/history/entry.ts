@@ -98,6 +98,10 @@ function isPromptEqual(entryA: PromptHistoryStoredEntry, entryB: PromptHistorySt
     if (partA.type === "skill") {
       if (partB.type !== "skill" || partA.id !== partB.id || partA.name !== partB.name) return false
     }
+    if (partA.type === "session") {
+      if (partB.type !== "session" || partA.sessionID !== partB.sessionID || partA.server !== partB.server ||
+        partA.title !== partB.title || partA.content !== partB.content || partA.start !== partB.start || partA.end !== partB.end) return false
+    }
     if (isAttachment(partA) && partA.id !== (isAttachment(partB) ? partB.id : "")) return false
   }
   if (entryA.comments.length !== entryB.comments.length) return false

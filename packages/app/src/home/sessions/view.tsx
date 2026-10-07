@@ -16,6 +16,13 @@ import { SessionTabAvatarView } from "@/shell/layout/session-tab-avatar"
 import { sessionLabel } from "@/session/title"
 import { shouldOpenSessionInBackground } from "./open"
 import { createAltHold } from "./alt-hold"
+import { useCopySessionID } from "@/session/copy-id"
+import { SessionReferenceHandle } from "@/composer/session-reference-handle"
+import { BranchReceptionIndicator } from "@/session/branch-reception-indicator"
+import { startSessionReferenceDrag } from "@/composer/session-reference"
+import { usePlatform } from "@/runtime/platform/platform"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { BranchMailDialog } from "@/session/branch-mail-dialog"
 import "./view.css"
 import {
   HomeSessionStatusController,
@@ -438,7 +445,7 @@ function HomeSessionSearchResultRow(
     >
       <HomeSessionLeadingController server={props.server} isOpenTab={props.isOpenTab} record={props.record} />
       <div data-slot="home-session-labels" class="flex min-w-0 flex-1 items-center gap-1.5">
-        <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} search />
+        <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} server={props.server} session={props.record.session} search />
         <Show when={showProjectName()}>
           <HomeSessionProjectName name={props.record.projectName} trailing={props.desktop} search />
         </Show>
@@ -493,6 +500,9 @@ function HomeSessionRow(
   const location = createMemo(() => props.location(props.record))
   const showProjectName = () => props.showProjectName && props.record.projectName
   const sessionID = () => props.record.session.id
+  const copySessionID = useCopySessionID()
+  const platform = usePlatform()
+  const dialog = useDialog()
   const menu = () => (props.rowUI.menu?.id === sessionID() ? props.rowUI.menu : undefined)
   const editor = () => (props.rowUI.editor?.id === sessionID() ? props.rowUI.editor : undefined)
   let longPressTimer: ReturnType<typeof setTimeout> | undefined
@@ -690,13 +700,18 @@ function HomeSessionRow(
             props.onOpenSession(props.record.session, { background: true })
           }}
         >
-          <HomeSessionLeadingController server={props.server} isOpenTab={props.isOpenTab} record={props.record} />
+          <SessionReferenceHandle server={props.server} session={props.record.session}>
+            <HomeSessionLeadingController server={props.server} isOpenTab={props.isOpenTab} record={props.record} />
+          </SessionReferenceHandle>
+          <Show when={platform.sessionLink}>
+            <BranchReceptionIndicator server={props.server} sessionID={props.record.session.id} />
+          </Show>
           <div
             data-slot="home-session-labels"
             class="min-w-0 flex-1 items-center gap-1.5"
             classList={{ flex: props.desktop, contents: !props.desktop }}
           >
-            <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} />
+            <HomeSessionTitle title={title()} showProjectName={!!showProjectName()} server={props.server} session={props.record.session} />
             <Show when={showProjectName()}>
               <HomeSessionProjectName name={props.record.projectName} trailing={props.desktop} />
             </Show>
@@ -748,6 +763,11 @@ function HomeSessionRow(
             }}
           >
             <Menu.Item onSelect={openEditor}>{props.language.t("common.rename")}</Menu.Item>
+            <Menu.Item onSelect={() => void copySessionID(props.record.session.id)}>
+              {props.language.t("command.session.copyID")}
+            </Menu.Item>
+            <Show when={platform.sessionLink}><Menu.Item onSelect={() => dialog.show(() => <BranchMailDialog server={props.server}
+              sessionID={props.record.session.id} title={title()} />)}>{props.language.t("branchMail.open")}</Menu.Item></Show>
             <Menu.Item onSelect={() => void props.onExportSession(props.server, props.record.session)}>
               {props.language.t("common.export")}…
             </Menu.Item>
@@ -785,12 +805,14 @@ function HomeSessionRow(
   )
 }
 
-function HomeSessionTitle(props: { title: string; showProjectName: boolean; search?: boolean }) {
+function HomeSessionTitle(props: { title: string; showProjectName: boolean; server: ServerConnection.Key; session: SessionInfo; search?: boolean }) {
   return (
     <span
       data-component="home-session-title"
+      draggable
+      onDragStart={(event) => startSessionReferenceDrag(event, props.server, props.session)}
       dir="auto"
-      class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-v2-text-text-base [font-weight:530]"
+      class="min-w-0 cursor-grab active:cursor-grabbing [-webkit-user-drag:element] overflow-hidden text-ellipsis whitespace-nowrap text-v2-text-text-base [font-weight:530]"
       classList={{
         "text-[13px] leading-4 tracking-[-0.04px]": !!props.search,
         "max-w-[min(70%,480px)] flex-[0_1_auto]": props.showProjectName,

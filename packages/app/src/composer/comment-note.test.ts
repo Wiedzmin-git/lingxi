@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { commentContextItem, readPromptPresentation } from "./comment-note"
+import { commentContextItem, readCommentMetadata, readPromptPresentation } from "./comment-note"
 import { createMemoryComposerState } from "./state"
 
 const durable = {
@@ -11,6 +11,7 @@ const durable = {
   href: "tab_00000000-0000-4000-8000-000000000000",
   comment: "Rename this",
 }
+
 const note = { ...durable, live: { subject: 'the "button#save" element (browser ref @e42)' } }
 
 describe("extension notes", () => {
@@ -31,6 +32,7 @@ describe("extension notes", () => {
       },
       comment: "Match @src/button.css",
     }
+
     const value = readPromptPresentation({
       displayText: "hi",
       comments: [
@@ -39,8 +41,17 @@ describe("extension notes", () => {
         browser,
         { ...browser, element: { label: "button" } },
         { path: "src/app.ts", comment: "Keep" },
+        {
+          type: "unexpected",
+          path: "src/legacy.ts",
+          comment: "Keep valid fields",
+          selection: { startLine: "bad" },
+          preview: 42,
+          origin: "unknown",
+        },
       ],
     })
+
     expect(value?.comments).toEqual([
       note,
       {
@@ -54,7 +65,22 @@ describe("extension notes", () => {
         comment: "Match @src/button.css",
       },
       { path: "src/app.ts", comment: "Keep" },
+      { path: "src/legacy.ts", comment: "Keep valid fields" },
     ])
+  })
+
+  test("keeps valid legacy comment metadata when optional fields are malformed", () => {
+    expect(
+      readCommentMetadata({
+        opencodeComment: {
+          path: "src/legacy.ts",
+          comment: "Keep valid fields",
+          selection: { startLine: 1 },
+          preview: false,
+          origin: "unknown",
+        },
+      }),
+    ).toEqual({ path: "src/legacy.ts", comment: "Keep valid fields" })
   })
 
   test("update and detach by commentID reach notes as well as file comments", () => {
@@ -73,5 +99,25 @@ describe("extension notes", () => {
 
   test("return to the composer without their live part", () => {
     expect(commentContextItem(note)).toEqual({ ...durable, commentID: expect.any(String) })
+
+    const quote = {
+      sessionID: "ses_original",
+      messageID: "msg_original",
+      userMessageID: "msg_user",
+      partID: "msg_original:text:0",
+      text: "The exact quote",
+      start: 0,
+      end: 15,
+      before: "",
+      after: "",
+      number: 1,
+    }
+
+    expect(commentContextItem({ ...note, origin: "message", quote })).toEqual({
+      ...durable,
+      origin: "message",
+      quote,
+      commentID: expect.any(String),
+    })
   })
 })

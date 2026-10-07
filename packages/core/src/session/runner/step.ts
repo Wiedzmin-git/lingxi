@@ -28,6 +28,7 @@ import { SessionUsage } from "../usage.js"
 import { SessionRunnerModel } from "./model.js"
 import { createLLMEventPublisher } from "./publish-llm-event.js"
 import { SessionRunnerRetry } from "./retry.js"
+import { CurrentExecution } from "../execution-witness.js"
 
 export type Outcome = Data.TaggedEnum<{
   Completed: { readonly needsContinuation: boolean }
@@ -79,6 +80,8 @@ export const make = Effect.gen(function* () {
       providerMetadataKey: input.model.model.route.providerMetadataKey ?? input.model.model.provider,
       snapshot: startSnapshot,
       started: yield* Clock.currentTimeMillis,
+      inputMessageIDs: input.prepared.request.messages.flatMap((message) => message.id ? [message.id] : []),
+      executionID: yield* CurrentExecution,
     })
     const toolRuns: Array<{
       readonly call: ToolCall

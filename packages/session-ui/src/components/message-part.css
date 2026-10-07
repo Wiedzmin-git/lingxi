@@ -127,9 +127,10 @@
   }
 
   [data-slot="user-message-body"] {
-    width: fit-content;
-    max-width: min(82%, 64ch);
-    margin-inline-start: auto;
+    width: calc(100% * 2 / 3);
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -137,6 +138,8 @@
 
   [data-slot="user-message-text"] {
     display: inline-block;
+    width: 100%;
+    box-sizing: border-box;
     white-space: pre-wrap;
     word-break: break-word;
     overflow: hidden;
@@ -156,6 +159,15 @@
 
     [data-slot="user-message-mention-prefix"] {
       color: var(--user-message-mention-prefix-color);
+    }
+
+    [data-highlight="session"] {
+      display: inline;
+      border: 1px solid var(--v2-border-border-base);
+      border-radius: 5px;
+      padding: 1px 4px;
+      font-weight: 600;
+      unicode-bidi: isolate;
     }
 
     max-width: 100%;
@@ -273,6 +285,15 @@
 
 [data-timeline-row="AssistantPart"][data-timeline-spacing="content"] [data-component="text-part"] {
   margin-top: 0;
+}
+
+/* The date header owns the start of a stamped message; keep text directly below. */
+.session-message-stamped [data-component="text-part"] {
+  margin-top: 0;
+}
+
+.compaction-summary [data-component="text-part"] {
+  margin-top: 4px;
 }
 
 [data-component="reasoning-part"] {
@@ -1564,8 +1585,18 @@
   }
 
   [data-slot="user-message-text"][data-comments] {
-    width: 342px;
     padding-bottom: 12px;
+  }
+}
+
+/* Follow the active chat width, including a narrow split pane on a wide window. */
+[data-component="user-message"] {
+  container-type: inline-size;
+}
+
+@container (max-width: 480px) {
+  [data-component="user-message"] [data-slot="user-message-body"] {
+    width: 96%;
   }
 }
 
@@ -1598,4 +1629,23 @@
   background: var(--v2-blue-1200);
   color: var(--v2-blue-300);
   border-radius: 8px;
+}
+
+/* Keep the custom palette local to bubbles, including both session placements. */
+:root[data-theme="graphite-soft"] body [data-component="user-message"] [data-slot="user-message-text"],
+:root[data-theme="graphite-soft"]
+  body
+  :is([data-local-session], [data-workspace-session])
+  [data-component="user-message"]
+  [data-slot="user-message-text"] {
+  --user-message-mention-prefix-color: var(
+    --v2-text-text-user-message-mention-prefix,
+    var(--v2-text-text-user-message)
+  );
+
+  background: var(--v2-background-bg-user-message, var(--v2-background-bg-layer-02));
+  color: var(--v2-text-text-user-message, var(--v2-text-text-base));
+  border: 1px solid var(--v2-border-border-user-message, var(--v2-border-border-base));
+  border-radius: 12px;
+  font-weight: 400;
 }

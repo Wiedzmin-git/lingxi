@@ -1,0 +1,5 @@
+::highlight(message-quotes) {
+  background-color: color-mix(in srgb, var(--v2-icon-icon-accent) 18%, transparent);
+  text-decoration: underline;
+  text-decoration-color: var(--v2-icon-icon-accent);
+}

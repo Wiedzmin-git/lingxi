@@ -32,6 +32,13 @@ export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const UpdateInput = ProjectSchema.UpdateInput
 export type UpdateInput = ProjectSchema.UpdateInput
 
+export const CreateInput = ProjectSchema.CreateInput
+export type CreateInput = ProjectSchema.CreateInput
+
+export class CreateError extends Schema.TaggedError<CreateError>()("Project.CreateError", {
+  message: Schema.String,
+}) {}
+
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Project.NotFoundError", {
   projectID: ID,
 }) {}
@@ -62,6 +69,7 @@ const ACTIVATE_INTERVAL = 60_000
 export interface Interface {
   readonly list: () => Effect.Effect<ReadonlyArray<Info>>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
+  readonly create: (input: CreateInput) => Effect.Effect<{ directory: AbsolutePath }, CreateError>
   /** Records Project activity for recency ordering, at most once per minute per Project. */
   readonly activate: (projectID: ID) => Effect.Effect<void>
   /** Resolves and persists the owning Project. */
@@ -379,7 +387,15 @@ const layer = Layer.effect(
       })
     })
 
-    return Service.of({ list, update, activate, resolve })
+    const create = Effect.fn("Project.create")(function* (input: CreateInput) {
+      const directory = AbsolutePath.make(path.join(input.parent, input.name))
+      // Non-recursive mkdir refuses an existing path and never creates missing parents.
+      yield* fs.makeDirectory(directory).pipe(Effect.mapError((cause) => new CreateError({ message: cause.message })))
+      yield* resolve(directory)
+      return { directory }
+    })
+
+    return Service.of({ list, update, create, activate, resolve })
   }),
 )
 

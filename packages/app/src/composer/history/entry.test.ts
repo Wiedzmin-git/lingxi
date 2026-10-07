@@ -51,6 +51,21 @@ describe("Composer history", () => {
     expect(removed).toEqual(prependHistoryEntry([], text("earlier")))
   })
 
+  test("history keeps exact branch identities, origins and saved spans despite identical titles", () => {
+    const reference = { type: "session" as const, server: "server-a", sessionID: "ses_first", title: "Same title", content: "Same title", start: 0, end: 10 }
+    const entries = prependHistoryEntry([], [reference])
+    expect(prependHistoryEntry(entries, [{ ...reference }])).toBe(entries)
+    for (const changed of [{ sessionID: "ses_second" }, { server: "server-b" }, { title: "Renamed" }, { content: "Renamed" }, { start: 1 }, { end: 9 }]) {
+      const prompt: Prompt = [{ ...reference, ...changed }]
+      const distinct = prependHistoryEntry(entries, prompt)
+      expect(distinct).toHaveLength(2)
+      expect(distinct[0].prompt).toEqual(prompt)
+      expect(removeHistoryEntry(distinct, prompt)).toEqual(entries)
+    }
+    const reordered: Prompt = [reference, { ...reference, sessionID: "ses_second" }]
+    expect(prependHistoryEntry(prependHistoryEntry([], reordered), [...reordered].reverse())).toHaveLength(2)
+  })
+
   test("insertion isolates canonical entries from source mutations", () => {
     const prompt: Prompt = [
       {

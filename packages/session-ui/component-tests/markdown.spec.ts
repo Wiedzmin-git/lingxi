@@ -13,6 +13,57 @@ story.beforeEach(async ({ mount }) => {
   await expect(root.locator('[data-component="markdown"]')).toHaveAttribute("data-markdown-ready", "")
 })
 
+story("local file context menu reveals the exact target without opening it and leaves other content alone", async ({ page }) => {
+  const cases = [
+    { text: '[**Installer**](releases/My%20file.exe)', selector: 'a[data-local-link]', path: 'releases/My file.exe' },
+    { text: '[Absolute](file:///D:/Gift%20folder/%D0%9F%D0%BE%D0%B4%D0%B0%D1%80%D0%BE%D0%BA.exe)', selector: 'a[data-local-link]', path: 'D:/Gift folder/Подарок.exe' },
+    { text: '`src/main.ts:12:3`', selector: 'code', path: 'src/main.ts:12:3' },
+    { text: '[Hash](releases/a%23b.exe)', selector: 'a[data-local-link]', path: 'releases/a#b.exe' },
+    { text: '[Percent](releases/a%2523b.exe)', selector: 'a[data-local-link]', path: 'releases/a%23b.exe' },
+  ]
+
+  for (const entry of cases) {
+    await page.evaluate(async ({ fixture, text }) => {
+      const { mountMarkdown } = await import(fixture)
+      document.querySelectorAll('[data-testid="markdown-fixture"]').forEach((node) => node.remove())
+      await mountMarkdown({ text, localFiles: true })
+    }, { fixture, text: entry.text })
+    const markdown = page.locator('[data-testid="markdown-fixture"] [data-component="markdown"]')
+    await expect(markdown).toHaveAttribute("data-markdown-ready", "")
+    const target = markdown.locator(entry.selector)
+    await target.click({ button: "right" })
+    const action = page.getByRole("menuitem", { name: "Show in File Explorer", exact: true })
+    await expect(action).toBeVisible()
+    await expect(page.getByLabel("Opened file")).toHaveText("")
+    await expect(page.getByLabel("Revealed file")).toHaveText("")
+    await action.press("Enter")
+    await expect(page.getByLabel("Revealed file")).toHaveText(entry.path)
+    await expect(page.getByLabel("Opened file")).toHaveText("")
+    await target.click()
+    await expect(page.getByLabel("Opened file")).toHaveText(entry.path)
+  }
+
+  for (const entry of [{ text: '[Web](https://example.com)', localFiles: true }, { text: 'ordinary text', localFiles: true },
+    { text: '[File](releases/app.exe)', localFiles: false }]) {
+    await page.evaluate(async ({ fixture, entry }) => {
+      const { mountMarkdown } = await import(fixture)
+      document.querySelectorAll('[data-testid="markdown-fixture"]').forEach((node) => node.remove())
+      await mountMarkdown(entry)
+    }, { fixture, entry })
+    const markdown = page.locator('[data-testid="markdown-fixture"] [data-component="markdown"]')
+    await expect(markdown).toHaveAttribute("data-markdown-ready", "")
+
+    const prevented = await markdown.evaluate((node) => {
+      const target = node.querySelector('a') ?? node
+
+      return !target.dispatchEvent(new MouseEvent("contextmenu", { button: 2, bubbles: true, cancelable: true }))
+    })
+
+    expect(prevented).toBe(false)
+    await expect(page.getByRole("menuitem", { name: "Show in File Explorer" })).toHaveCount(0)
+  }
+})
+
 story("renders small completed Markdown immediately without skipping sanitization", async ({ page }) => {
   const result = await page.evaluate(async (fixture) => {
     const { mountMarkdown } = await import(fixture)

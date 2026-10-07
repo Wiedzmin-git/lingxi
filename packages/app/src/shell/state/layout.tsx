@@ -117,7 +117,10 @@ export const layoutSchema = Persistence.struct({
     // keeps telling current layouts from ones saved before the tab existed.
     tab: Schema.Literals(["changes", "all"]),
   }),
-  session: Persistence.struct({ width: Schema.Finite }),
+  session: Persistence.struct({
+    width: Schema.Finite,
+    contentWidth: Persistence.optional(Schema.Finite),
+  }),
   mobileSidebar: Persistence.struct({ opened: Schema.Boolean }),
   sessionTabs: Persistence.record(Persistence.fallback(sessionTabsSchema, () => ({ all: [] }))),
   sessionView: Persistence.record(Persistence.fallback(sessionViewSchema, () => ({ scroll: {} }))),
@@ -409,6 +412,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       },
       session: {
         width: createMemo(() => store.session?.width ?? DEFAULT_SESSION_WIDTH),
+        contentWidth: createMemo(() => store.session?.contentWidth),
         resize(width: number) {
           if (!store.session) {
             setStore("session", { width })
@@ -417,6 +421,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           }
 
           setStore("session", "width", width)
+        },
+        resizeContent(contentWidth?: number) {
+          if (!store.session) {
+            setStore("session", { width: DEFAULT_SESSION_WIDTH, contentWidth })
+            return
+          }
+          setStore("session", "contentWidth", contentWidth)
         },
       },
       mobileSidebar: {

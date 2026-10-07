@@ -4,6 +4,7 @@ import type {
   ComposerAgentPart,
   ComposerFilePart,
   ComposerSkillPart,
+  ComposerSessionPart,
   ComposerPersistedState,
   ComposerPrompt,
 } from "../types"
@@ -70,7 +71,7 @@ export function createComposerEditorActions(input: ComposerStateStoreInput) {
       clearRetry()
     },
     addMention(
-      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
+      mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerSessionPart,
       range?: { start: number; end: number },
     ) {
       const text = store()
@@ -114,17 +115,25 @@ function insertMention(
   prompt: ComposerPrompt,
   start: number,
   end: number,
-  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart,
+  mention: ComposerFilePart | ComposerAgentPart | ComposerSkillPart | ComposerSessionPart,
 ): ComposerPrompt {
   if (start === 0 && end === 0) {
     return withOffsets([mention, { type: "text", content: " ", start: 0, end: 0 }, ...prompt])
   }
   let position = 0
+  let inserted = false
   const parts = prompt.flatMap<ComposerPrompt[number]>((part) => {
     if (isAttachment(part)) return [part]
     const partStart = position
     position += part.content.length
+    if (inserted) return [part]
+    if (part.type !== "text" && start === end && start >= partStart && start <= position) {
+      inserted = true
+      const space = { type: "text" as const, content: " ", start: 0, end: 0 }
+      return start === partStart ? [mention, space, part] : [part, mention, space]
+    }
     if (part.type !== "text" || start < partStart || end > position) return [part]
+    inserted = true
     const before = part.content.slice(0, start - partStart)
     const after = part.content.slice(end - partStart)
     return [
@@ -133,6 +142,7 @@ function insertMention(
       { type: "text" as const, content: ` ${after}`, start: 0, end: 0 },
     ]
   })
+  if (!inserted && start === end) parts.push(mention, { type: "text", content: " ", start: 0, end: 0 })
   return withOffsets(parts)
 }
 

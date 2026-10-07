@@ -156,6 +156,8 @@ import type {
   CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
+  ProjectCreateInput,
+  ProjectCreateOutput,
   ProjectListOutput,
   ProjectUpdateInput,
   ProjectUpdateOutput,
@@ -1458,6 +1460,18 @@ export function make(options: ClientOptions) {
         ),
     },
     project: {
+      create: (input: ProjectCreateInput, requestOptions?: RequestOptions) =>
+        request<ProjectCreateOutput>(
+          {
+            method: "POST",
+            path: `/api/project`,
+            body: { parent: input["parent"], name: input["name"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404],
+            empty: false,
+          },
+          requestOptions,
+        ),
       list: (requestOptions?: RequestOptions) =>
         request<ProjectListOutput>(
           { method: "GET", path: `/api/project`, successStatus: 200, declaredStatuses: [400, 401, 404], empty: false },

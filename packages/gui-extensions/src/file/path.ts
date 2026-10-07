@@ -19,19 +19,48 @@ export const workspaceFileUrl = (root: string, path: string) =>
 export function resolveOpenInAppPath(root: string, path: string) {
   if (!path) return root
   const windowsRoot = root.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(root)
+
   if (path.startsWith("/") || (windowsRoot && path.startsWith("\\")) || /^[A-Za-z]:[\\/]/.test(path)) return path
+
   if (!root) return path
 
   const separator = root.includes("\\") ? "\\" : "/"
   const relative = windowsRoot ? path.replace(/^[\\/]+/, "") : path
+
   return `${root.replace(/[\\/]+$/, "")}${separator}${windowsRoot ? relative.replaceAll(separator === "\\" ? "/" : "\\", separator) : relative}`
+}
+
+/** Resolve an already decoded Markdown path without URI decoding or query/hash stripping. */
+export function resolveMarkdownRevealPath(root: string, href: string, base = "") {
+  const value = href.replaceAll("\\", "/").replace(/:\d+(?::\d+)?$/, "")
+  const source = resolveOpenInAppPath(resolveOpenInAppPath(root, base), value).replaceAll("\\", "/")
+  // A drive or UNC share is the filesystem root, not a segment `..` can remove.
+  const anchor = /^(?:[a-z]:\/|\/\/[^/]+\/[^/]+(?:\/|$)|\/)/i.exec(source)?.[0] ?? ""
+  const segments: string[] = []
+
+  for (const segment of source.slice(anchor.length).split("/")) {
+    if (!segment || segment === ".") continue
+
+    if (segment === "..") {
+      segments.pop()
+      continue
+    }
+
+    segments.push(segment)
+  }
+
+  return `${anchor && !anchor.endsWith("/") ? `${anchor}/` : anchor}${segments.join("/")}`
 }
 
 export function openInAppParentPath(path: string) {
   const value = path.replace(/[\\/]+$/, "")
   const index = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"))
+
   if (index < 0) return path
+
   if (index === 0) return value.slice(0, 1)
+
   if (index === 2 && /^[A-Za-z]:/.test(value)) return value.slice(0, 3)
+
   return value.slice(0, index)
 }

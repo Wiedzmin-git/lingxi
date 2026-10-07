@@ -1,3 +1,14 @@
+# Lingxi · 靈犀
+
+An independent OpenCode V2 fork for sustained collaboration between people and AI.
+Read [the name, attribution, and development status](LINGXI.md).
+
+**Release status:** Lingxi-branded Windows releases and private `dev` / `stable` updates are in development. The upstream downloads linked below install OpenCode, not Lingxi.
+
+---
+
+## Upstream OpenCode
+
 <p align="center">
   <a href="https://opencode.ai">
     <picture>

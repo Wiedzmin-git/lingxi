@@ -558,6 +558,34 @@ describe("SessionProjector", () => {
     }),
   )
 
+  it.effect("retains exact attempt witnesses on a reused assistant and binds idle to its execution", () =>
+    Effect.gen(function* () {
+      const db = yield* seedSession()
+      const bus = yield* Bus.Service
+      const assistantMessageID = SessionMessage.ID.make("msg_attempt_witness")
+      const executionID = Event.ID.make("evt_execution_witness")
+      const first = yield* bus.publish(SessionEvent.Step.Started, {
+        sessionID, assistantMessageID, agent: build, model, started: 10,
+        executionID, inputMessageIDs: ["msg_incoming_mail"],
+      })
+      const second = yield* bus.publish(SessionEvent.Step.Started, {
+        sessionID, assistantMessageID, agent: build, model, started: 20,
+        executionID, inputMessageIDs: [],
+      })
+      yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID, executionID })
+      const rows = yield* db.select().from(SessionMessageTable).where(eq(SessionMessageTable.session_id, sessionID))
+        .orderBy(asc(SessionMessageTable.seq)).all().pipe(Effect.orDie)
+      expect(rows).toHaveLength(2)
+      expect(rows[0].data).toMatchObject({ metadata: {
+        requestMessageIDs: [], requestAttempts: [
+          { id: first.id, started: 10, executionID, inputMessageIDs: ["msg_incoming_mail"] },
+          { id: second.id, started: 20, executionID, inputMessageIDs: [] },
+        ],
+      } })
+      expect(rows[1]).toMatchObject({ type: "idle", data: { outcome: "succeeded", metadata: { executionID } } })
+    }),
+  )
+
   it.effect("does not infer restart continuation from lifecycle history", () =>
     Effect.gen(function* () {
       const db = yield* seedSession()

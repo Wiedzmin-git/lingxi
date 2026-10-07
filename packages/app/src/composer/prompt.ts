@@ -40,6 +40,15 @@ type Inline =
       id: Skill.ID
       name: Skill.Name
     }
+  | {
+      type: "session"
+      start: number
+      end: number
+      value: string
+      sessionID: string
+      server?: string
+      title: string
+    }
 
 function selectionFromFileUrl(url: string): Extract<Inline, { type: "file" }>["selection"] {
   const queryIndex = url.indexOf("?")
@@ -83,7 +92,15 @@ export function extractPromptFromMessage(
     return path
   }
 
-  const inline: Inline[] = []
+  const inline: Inline[] = (presentation?.sessionReferences ?? []).map((part) => ({
+    type: "session",
+    sessionID: part.sessionID,
+    ...(part.server ? { server: part.server } : {}),
+    title: part.title,
+    start: part.start,
+    end: part.end,
+    value: part.content,
+  }))
   const trailing: Inline[] = []
   const attachments: (ImageAttachmentPart | PathAttachmentPart)[] = []
 
@@ -251,6 +268,11 @@ function buildPrompt(
     if (item.type === "skill") {
       result.push({ type: "skill", id: item.id, name: item.name, ...span })
 
+      return
+    }
+
+    if (item.type === "session") {
+      result.push({ type: "session", sessionID: item.sessionID, ...(item.server ? { server: item.server } : {}), title: item.title, ...span })
       return
     }
 

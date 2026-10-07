@@ -75,10 +75,21 @@ test("the dark new session panel exposes no lighter background at its rounded co
 test("a pending worktree session shows immediately, keeps its draft, and hands off to the created session", async ({
   page,
 }) => {
-  const mock = await openWorktreeDraft(page, { ...pendingDraft, createdSessionTitle: "" })
+  const mock = await openWorktreeDraft(page, {
+    ...pendingDraft,
+    createdSessionTitle: "",
+    seed: {
+      storage: { "opencode.global.dat:layout": { session: { width: 700, contentWidth: 680 } } },
+    },
+  })
   const label = page.locator('[data-titlebar-tab-slot][data-active="true"] [data-titlebar-tab-title]')
   await expect(label).toHaveText("Session")
   const pending = await submitPending(page, mock)
+  const pendingWidth = (await pending.message.boundingBox())?.width ?? 0
+  await expect(page.locator('[data-component="session-composer-dock"] > div')).toHaveCSS(
+    "max-width",
+    "min(680px, max(0px, 100% - 24px))",
+  )
   const spinner = tabLink(page, pending.sessionID).locator('[data-component="session-progress-indicator-v2"]')
   await expect(spinner).toBeVisible()
   await expect(label).toHaveText("Session")
@@ -119,6 +130,10 @@ test("a pending worktree session shows immediately, keeps its draft, and hands o
   await tabLink(page, pending.sessionID).click()
   await expect(pending.shimmer).toHaveCount(0)
   await expect(pending.message.locator('[data-slot="user-message-text"]')).toHaveText(text)
+  await expect.poll(() => pending.message.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(
+    pendingWidth,
+    0,
+  )
   await expect(editor(page)).toHaveText(followUp)
   await expect(label).toHaveText("Session")
   await submit(page).click()

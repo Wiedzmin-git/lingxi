@@ -29,6 +29,7 @@ export type {
   Prompt,
   PromptModel,
   SkillPart,
+  SessionReferencePart,
   TextPart,
 } from "./schema"
 
@@ -60,13 +61,26 @@ function createComposerActions(setStore: SetStoreFunction<ComposerStore>) {
 }
 
 function composerTarget(serverScope: ServerScope, scope: PromptScope) {
-  return "draftID" in scope
-    ? Persist.prompt(Persist.draft(scope.draftID, "prompt"))
-    : Persist.prompt({
-        ...Persist.serverScoped(serverScope, scope.dir, scope.id, "prompt"),
-        previousKey:
-          serverScope === ServerScope.local ? `${scope.dir}/prompt${scope.id ? "/" + scope.id : ""}.v2` : undefined,
-      })
+  if ("draftID" in scope) return Persist.prompt(Persist.draft(scope.draftID, "prompt"))
+
+  const previous = Persist.serverScoped(serverScope, scope.dir, scope.id, "prompt")
+  const previousKey = serverScope === ServerScope.local ? `${scope.dir}/prompt${scope.id ? "/" + scope.id : ""}.v2` : undefined
+
+  if (!scope.id) return Persist.prompt({ ...previous, previousKey })
+
+  // A Session keeps its identity when it moves; its unsent composer must do the same.
+  return Persist.prompt({
+    ...Persist.serverGlobal(serverScope, `session:${scope.id}:prompt`),
+    copyFrom: [
+      { storage: previous.storage, key: previous.key, draft: true },
+      { storage: previous.storage, key: previous.key, namespaceOnly: serverScope !== ServerScope.local },
+      ...(previous.workspaceStorageAliases ?? []).flatMap((storage) => [
+        { storage, key: previous.key, draft: true },
+        { storage, key: previous.key, namespaceOnly: serverScope !== ServerScope.local },
+      ]),
+      ...(previousKey ? [{ key: previousKey }] : []),
+    ],
+  })
 }
 
 function initialComposerStore(initial?: InitialPrompt): ComposerStore {

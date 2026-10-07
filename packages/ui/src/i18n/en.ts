@@ -1,4 +1,5 @@
 const source = {
+  "ui.message.timestamp": "Message date and time",
   "ui.sessionReview.title": "Session changes",
   "ui.sessionReview.title.git": "Git changes",
   "ui.sessionReview.title.branch": "Branch changes",
@@ -110,6 +111,9 @@ const source = {
   "ui.messagePart.compaction.started": "Session compaction started",
   "ui.messagePart.compaction.queued": "Session compaction queued",
   "ui.messagePart.compaction.running": "Compacting",
+  "ui.messagePart.compaction.summary": "Summary",
+  "ui.messagePart.compaction.showSummary": "Show compaction summary",
+  "ui.messagePart.compaction.hideSummary": "Hide compaction summary",
   "ui.messagePart.compaction.failed": "Session compaction failed",
   "ui.messagePart.compaction.cancelled": "Session compaction cancelled",
   "ui.messagePart.compaction.interrupted": "Session compaction interrupted",

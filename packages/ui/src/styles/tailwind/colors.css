@@ -243,6 +243,7 @@
   --color-v2-background-bg-icon-button-contrast: var(--v2-background-bg-icon-button-contrast);
   --color-v2-background-bg-button-neutral: var(--v2-background-bg-button-neutral);
   --color-v2-background-bg-accent: var(--v2-background-bg-accent);
+  --color-v2-background-bg-user-message: var(--v2-background-bg-user-message);
   --color-v2-text-text-base: var(--v2-text-text-base);
   --color-v2-text-text-muted: var(--v2-text-text-muted);
   --color-v2-text-text-faint: var(--v2-text-text-faint);
@@ -251,6 +252,8 @@
   --color-v2-text-text-accent: var(--v2-text-text-accent);
   --color-v2-text-text-accent-hover: var(--v2-text-text-accent-hover);
   --color-v2-text-text-code-accent: var(--v2-text-text-code-accent);
+  --color-v2-text-text-user-message: var(--v2-text-text-user-message);
+  --color-v2-text-text-user-message-mention-prefix: var(--v2-text-text-user-message-mention-prefix);
   --color-v2-icon-icon-base: var(--v2-icon-icon-base);
   --color-v2-icon-icon-muted: var(--v2-icon-icon-muted);
   --color-v2-icon-icon-faint: var(--v2-icon-icon-faint);
@@ -263,6 +266,7 @@
   --color-v2-border-border-strong: var(--v2-border-border-strong);
   --color-v2-border-border-inverse: var(--v2-border-border-inverse);
   --color-v2-border-border-focus: var(--v2-border-border-focus);
+  --color-v2-border-border-user-message: var(--v2-border-border-user-message);
   --color-v2-overlay-simple-overlay-hover: var(--v2-overlay-simple-overlay-hover);
   --color-v2-overlay-simple-overlay-pressed: var(--v2-overlay-simple-overlay-pressed);
   --color-v2-overlay-simple-overlay-contrast-hover: var(--v2-overlay-simple-overlay-contrast-hover);

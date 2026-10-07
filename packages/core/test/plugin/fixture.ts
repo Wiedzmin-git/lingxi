@@ -8,6 +8,7 @@ import { AppProcess } from "@opencode/util/process"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Bus } from "@opencode/core/bus"
 import { FileSystem } from "@opencode/core/filesystem"
+import { FileAccess } from "@opencode/core/file-access"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Form } from "@opencode/core/form"
 import { Generate } from "@opencode/core/generate"
@@ -70,6 +71,7 @@ export const PluginTestLayer = AppNodeBuilder.build(
   LayerNode.group([
     AppProcess.node,
     FileSystem.node,
+    FileAccess.node,
     FSUtil.node,
     Location.node,
     Npm.node,

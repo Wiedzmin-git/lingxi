@@ -33,6 +33,7 @@ import { Worktree } from "../worktree.js"
 import { WorktreeStrategies } from "../worktree/strategies.js"
 import { Generate } from "../generate.js"
 import { Permission } from "../permission.js"
+import { FileAccess } from "../file-access.js"
 import { PluginHooks } from "./hooks.js"
 import type { Interface } from "../plugin.js"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -67,6 +68,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const websearch = yield* WebSearch.Service
   const generate = yield* Generate.Service
   const permission = yield* Permission.Service
+  const fileAccess = yield* FileAccess.Service
   const hooks = yield* PluginHooks.Service
   const sessions = yield* Session.Service
   const persistentPty = yield* PersistentPty.Service
@@ -402,6 +404,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         }),
     },
     permission: {
+      authorizeRead: (input) => fileAccess.authorizeRead(input.path, input.context).pipe(Effect.map((target) => target.absolute)),
       hook: (name, callback) => hooks.register("permission", name, callback),
       list: (input) => permission.forSession(input.sessionID),
       get: (input) =>
@@ -593,6 +596,7 @@ export const requirements = LayerNode.group([
   WorktreeStrategies.node,
   Generate.node,
   Permission.node,
+  FileAccess.node,
   PluginHooks.node,
   Session.node,
   PersistentPty.node,

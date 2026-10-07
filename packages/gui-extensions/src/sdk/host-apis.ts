@@ -1023,6 +1023,13 @@ export interface Links {
    * @returns False when no handler matches.
    */
   open(link: Link): boolean
+  /**
+   * Gets the winning handler's file-manager action without executing it. Undefined when that handler cannot reveal
+   * the target; never falls through to another handler or opens the target.
+   *
+   * @param link - The local link whose context menu the user requested.
+   */
+  reveal(link: Link): (() => void) | undefined
 }
 
 /** One dialog `Dialogs.open` opened. */

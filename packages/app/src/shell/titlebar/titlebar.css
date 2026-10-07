@@ -81,6 +81,15 @@
   font-weight: 530;
 }
 
+/* The drawer reserves close-button space itself. Override title-owned masks,
+   including overflow and touch variants, without changing sidebar fading. */
+[data-slot="mobile-tabs-drawer"]
+  [data-titlebar-tab][data-orientation="vertical"]:not([data-editing="true"])
+  [data-slot="tab-title"] {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
 [data-slot="mobile-tabs-drawer"] [data-titlebar-tab] [data-slot="tab-project"] {
   color: var(--v2-text-text-faint);
   font-weight: 440;

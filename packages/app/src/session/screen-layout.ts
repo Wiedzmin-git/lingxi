@@ -1,11 +1,20 @@
 import { createEffect, createMemo, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
+import { createMediaQuery } from "@solid-primitives/media"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLayout } from "@/shell/state/layout"
 import { useSettings } from "@/settings/model"
 import { createSizing } from "./helpers"
 import type { SessionModel } from "./model"
-import { clampSessionPanelWidth, sessionPanelWidthMax } from "./session-panel-width"
+import {
+  clampSessionContentWidth,
+  clampSessionPanelWidth,
+  SESSION_CONTENT_WIDTH_DEFAULT,
+  SESSION_CONTENT_WIDTH_DEFAULT_WIDE,
+  SESSION_CONTENT_WIDTH_MIN,
+  sessionContentWidthMax,
+  sessionPanelWidthMax,
+} from "./session-panel-width"
 
 /** wide asks for the wider session minimum; sidebar is whether any extension fills the side panel sidebar. */
 export function createSessionScreenLayout(
@@ -15,6 +24,7 @@ export function createSessionScreenLayout(
   const layout = useLayout()
   const settings = useSettings()
   const size = createSizing()
+  const wideDesktop = createMediaQuery("(min-width: 96rem)")
   const view = session.layout.view
   const tabsOpen = createMemo(() => session.isDesktop() && view().side.opened() && !!session.identity.params.id)
   const dockOpen = createMemo(() => view().dock.opened())
@@ -28,11 +38,16 @@ export function createSessionScreenLayout(
 
   const resizable = createMemo(() => tabsOpen() || dockSideOpen())
   const besideOpen = createMemo(() => resizable() || fileTreeOpen())
-  const [rowSize, setRowSize] = createStore<{ width?: number; height?: number }>({})
+  const [rowSize, setRowSize] = createStore<{ width?: number; height?: number; contentWidth?: number }>({})
   let row: HTMLDivElement | undefined
+  let content: HTMLDivElement | undefined
   createResizeObserver(
     () => row,
     ({ width, height }) => setRowSize({ width, height }),
+  )
+  createResizeObserver(
+    () => content,
+    ({ width }) => setRowSize("contentWidth", width),
   )
 
   const available = createMemo<number | undefined>(() => {
@@ -109,6 +124,20 @@ export function createSessionScreenLayout(
 
     return previous
   }, "100%")
+  const contentDefaultWidth = createMemo(() =>
+    wideDesktop() ? SESSION_CONTENT_WIDTH_DEFAULT_WIDE : SESSION_CONTENT_WIDTH_DEFAULT,
+  )
+  const contentWidth = createMemo(() =>
+    clampSessionContentWidth({
+      width: layout.session.contentWidth() ?? contentDefaultWidth(),
+      available: rowSize.contentWidth,
+    }),
+  )
+  const contentMax = createMemo(() => {
+    const width = rowSize.contentWidth
+    if (width === undefined) return contentDefaultWidth()
+    return sessionContentWidthMax(width)
+  })
 
   return {
     centered: createMemo(() => session.isDesktop()),
@@ -121,6 +150,16 @@ export function createSessionScreenLayout(
       resizable,
       resizedWidth,
       width: panelWidth,
+    },
+    content: {
+      max: contentMax,
+      min: createMemo(() => Math.min(SESSION_CONTENT_WIDTH_MIN, contentMax())),
+      ref: (element: HTMLDivElement) => {
+        content = element
+      },
+      resizable: createMemo(() => session.isDesktop() && rowSize.contentWidth !== undefined),
+      resize: layout.session.resizeContent,
+      width: contentWidth,
     },
     side: {
       contentWidth: sideContentWidth,

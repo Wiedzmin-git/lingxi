@@ -1,6 +1,8 @@
 import { Component } from "solid-js"
 import { Select } from "@opencode/ui/select"
 import { TextInput } from "@opencode/ui/text-input"
+import { Switch } from "@opencode/ui/switch"
+import { useSettings } from "@/settings/model"
 import { useLanguage } from "@/runtime/i18n/language"
 import { ExternalLink } from "@/runtime/platform/external-link"
 import { SettingsList } from "@/settings/list"
@@ -64,6 +66,7 @@ const FontSetting: Component<{
 export const SettingsAppearance: Component = () => {
   const language = useLanguage()
   const appearance = createAppearanceSettingsController()
+  const settings = useSettings()
 
   return (
     <>
@@ -124,6 +127,18 @@ export const SettingsAppearance: Component = () => {
             <FontSetting kind="ui" fonts={appearance.fonts} />
             <FontSetting kind="code" fonts={appearance.fonts} />
             <FontSetting kind="terminal" fonts={appearance.fonts} />
+            <SettingsRow
+              title={language.t("settings.appearance.messageTimestamps.title")}
+              description={language.t("settings.appearance.messageTimestamps.description")}
+            >
+              <Switch
+                checked={settings.appearance.messageTimestamps()}
+                onChange={settings.appearance.setMessageTimestamps}
+                hideLabel
+              >
+                {language.t("settings.appearance.messageTimestamps.title")}
+              </Switch>
+            </SettingsRow>
           </SettingsList>
         </div>
       </div>

@@ -2,6 +2,8 @@ import { Predicate, Schema, SchemaGetter } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 import { Pty } from "@opencode/schema/pty"
 import { Worktree } from "@opencode/schema/worktree"
+import { Project } from "@opencode/schema/project"
+import { Location } from "@opencode/schema/location"
 
 // Handlers answer plain fixture data: undefined properties are dropped, and other non-JSON values become null.
 const Json = Schema.Json.pipe(
@@ -143,6 +145,7 @@ const Group = HttpApiGroup.make("mock")
   )
   .add(HttpApiEndpoint.get("mcpResource", "/api/mcp/resource", { success: Json }))
   .add(HttpApiEndpoint.get("projectList", "/api/project", { success: Json }))
+  .add(HttpApiEndpoint.post("projectCreate", "/api/project", { payload: Project.CreateInput, success: Json, error: Unsupported }))
   .add(
     HttpApiEndpoint.patch("projectUpdate", "/api/project/:projectID", {
       params: { projectID: Schema.String },
@@ -275,6 +278,12 @@ const Group = HttpApiGroup.make("mock")
     }),
   )
   .add(HttpApiEndpoint.post("sessionCreate", "/api/session", { payload: JsonPayload, success: Json }))
+  .add(HttpApiEndpoint.post("sessionMove", "/api/session/:sessionID/move", {
+    params: SessionParams,
+    payload: Location.PublicRef,
+    success: NoContent,
+    error: Unsupported,
+  }))
   .add(HttpApiEndpoint.get("sessionActive", "/api/session/active", { success: Json }))
   .add(
     HttpApiEndpoint.get("sessionGet", "/api/session/:sessionID", {

@@ -1,0 +1,26 @@
+[data-component="dialog-v2"] [data-slot="dialog-container"].branch-mail-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+
+  [data-slot="dialog-content"] {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  [data-slot="dialog-header-title"] {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  [data-slot="dialog-body"] {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    scrollbar-gutter: stable;
+
+    > * {
+      flex-shrink: 0;
+    }
+  }
+}

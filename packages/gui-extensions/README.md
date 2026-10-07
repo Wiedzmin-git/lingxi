@@ -230,6 +230,11 @@ SDK icon fields use `IconName` from `@opencode/ui/icons/catalog`, a dependency-f
 | `ctx.desktop`                | `Desktop \| undefined`                                         | Desktop-only: reveal, launch, installed, zoom, forceFocus         |
 | `ctx.dialogs`                | `Dialogs`                                                      | `open` returns a handle to close; a dialog closes with its owner  |
 | `ctx.links`                  | `Links`                                                        | Routes a local link to the best `LinkHandler`                     |
+
+`ctx.links.reveal(link)` asks the same winning `LinkHandler` for an optional file-manager action without executing
+it. A handler's `reveal` returns undefined when unavailable (for example, a remote workspace or the web). The caller
+offers the returned action in a context menu; invoking it reveals the captured target without opening it. Handlers
+retain the exact target, respect their instance lifetime and report failures rather than launching the file as a fallback.
 | `ctx.embeds`                 | `Embeds`                                                       | Shows a web page the main entry created                           |
 | `ctx.build`                  | `Build`                                                        | Version, channel, platform, packaged                              |
 | `ctx.locale`                 | `Locale`                                                       | Locale and writing direction                                      |

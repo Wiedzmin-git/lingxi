@@ -5,6 +5,7 @@ import type {
   DialogHandle,
   Dialogs,
   Live,
+  Link,
   PanelTab,
   SessionRef,
   SessionScreen,
@@ -26,6 +27,41 @@ type Reads = { state?: () => string; font?: () => string; prefs?: { value?: { co
 story.beforeEach(async ({ mount }) => {
   // Any story loads the app; the fixture mounts the real host beside it.
   await mount("ui-line-comment--editor")
+})
+
+story("file reveal uses the winning link handler without opening or falling through an unavailable handler", async ({ page }) => {
+  const result = await page.evaluate(async (fixture) => {
+    const { mountExtensionHost, LinkHandler, until } = await import(fixture)
+    const host = mountExtensionHost()
+    const calls: string[] = []
+    const kept: Kept = {}
+    let available = true
+    host.load((ctx: Context) => {
+      kept.ctx = ctx
+      ctx.add(LinkHandler, { match: () => true, open: () => calls.push("low-open"), reveal: () => () => calls.push("low-reveal") })
+      ctx.add(LinkHandler, {
+        priority: 10,
+        match: (link: Link) => link.href.startsWith("files/"),
+        open: () => calls.push("high-open"),
+        reveal: (link: Link) => available ? () => calls.push(link.href) : undefined,
+      })
+    })
+    await until(() => !!kept.ctx)
+
+    if (!kept.ctx) throw new Error("Missing fixture context")
+    const action = kept.ctx.links.reveal({ href: "files/exact.exe" })
+    const before = [...calls]
+    action?.()
+    available = false
+    const unavailable = kept.ctx.links.reveal({ href: "files/exact.exe" })
+    kept.ctx.links.open({ href: "files/exact.exe" })
+    const outcome = { before, calls, action: !!action, unavailable: unavailable === undefined }
+    host.unmount()
+
+    return outcome
+  }, fixture)
+
+  expect(result).toEqual({ before: [], calls: ["files/exact.exe", "high-open"], action: true, unavailable: true })
 })
 
 story("an extension that finishes loading after the host unmounts is never set up", async ({ page }) => {

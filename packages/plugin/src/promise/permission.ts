@@ -3,6 +3,7 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Permission } from "@opencode/schema/permission"
 import type { Session } from "@opencode/schema/session"
 import type { Hooks } from "./registration.js"
+import type { ToolContext } from "./tool.js"
 
 export interface PermissionEvaluation {
   readonly sessionID: Session.ID
@@ -21,4 +22,6 @@ export interface PermissionHooks {
 
 export type PermissionDomain = Pick<PermissionApi, "list" | "get" | "reply"> & {
   readonly hook: Hooks<PermissionHooks>
+  /** Same file/external-directory permission boundary as the native read tool. Does not read bytes. */
+  readonly authorizeRead: (input: { readonly path: string; readonly context: Pick<ToolContext, "sessionID" | "agent" | "messageID" | "id"> }, options?: { readonly signal?: AbortSignal }) => Promise<string>
 }

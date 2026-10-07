@@ -59,6 +59,17 @@ export const SkillPart = Persistence.struct({
 
 export type SkillPart = typeof SkillPart.Type
 
+/** A local branch reference, not a subagent, a LAN invitation or a send instruction. */
+export const SessionReferencePart = Persistence.struct({
+  type: Schema.Literal("session"),
+  ...PartBase,
+  sessionID: Schema.String.check(Schema.isPattern(/^ses_[A-Za-z0-9_-]+$/)),
+  server: Persistence.optional(Schema.String),
+  title: Schema.String,
+})
+
+export type SessionReferencePart = typeof SessionReferencePart.Type
+
 const ImageFields = {
   type: Schema.Literal("image"),
   id: Schema.String,
@@ -121,6 +132,7 @@ export const ContentPart = Schema.Union([
   FileAttachmentPart,
   AgentPart,
   SkillPart,
+  SessionReferencePart,
   ImageAttachmentPart,
   PathAttachmentPart,
 ])
@@ -154,6 +166,21 @@ export const FileContextItem = Persistence.struct({
 
 export type FileContextItem = typeof FileContextItem.Type
 
+export const MessageQuote = Persistence.struct({
+  sessionID: Schema.String,
+  messageID: Schema.String,
+  userMessageID: Schema.String,
+  partID: Schema.String,
+  text: Schema.String,
+  start: Schema.Number,
+  end: Schema.Number,
+  before: Schema.String,
+  after: Schema.String,
+  number: Schema.Number,
+})
+
+export type MessageQuote = typeof MessageQuote.Type
+
 const NoteFields = {
   type: Schema.Literal("note"),
   origin: Schema.String,
@@ -163,6 +190,7 @@ const NoteFields = {
   href: Persistence.optional(Schema.String),
   live: Persistence.optional(Persistence.struct({ subject: Schema.String, href: Persistence.optional(Schema.String) })),
   comment: Schema.String,
+  quote: Persistence.optional(MessageQuote),
 }
 
 /** An extension's comment on something other than workspace lines, as sent in message metadata. */

@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8" />
   </head>
-  <body>
-    <div id="root"></div>
+  <body class="antialiased overscroll-none font-(family-name:--font-family-text) text-[13px] font-[440] overflow-hidden bg-v2-background-bg-deep">
+    <div id="root" class="flex flex-col h-dvh bg-v2-background-bg-deep p-px"></div>
     <script type="module">
       import { mount } from "./windows-menu.fixture.tsx"
-      mount({ server: new URLSearchParams(location.search).get("server") })
+      const query = new URLSearchParams(location.search)
+      mount({ server: query.get("server"), mailbox: query.has("mailbox"), reception: query.has("reception") })
     </script>
   </body>
 </html>

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { timelinePresets } from "@opencode/session-ui/timeline/detail"
 import { createTwoFilesPatch } from "diff"
+import { seed } from "../utils/app"
 import {
   assistantMessage,
   partUpdated,
@@ -10,6 +11,7 @@ import {
   shell,
   textPart,
   toolPart,
+  userID,
   userMessage,
   userText,
   waitForVisualSettle,
@@ -33,6 +35,121 @@ const contextTools = [
   },
   { id: "ctx_0103_list", tool: "list", input: { path: "src" } },
 ]
+
+for (const [mode, expected] of [
+  [
+    "light",
+    {
+      background: "rgb(232, 237, 241)",
+      color: "rgb(40, 50, 59)",
+      border: "rgb(203, 212, 220)",
+      borderStyle: "solid",
+      borderWidth: "1px",
+      radius: "12px",
+      weight: "400",
+      mention: "rgb(66, 103, 137)",
+    },
+  ],
+  [
+    "dark",
+    {
+      background: "rgb(32, 38, 43)",
+      color: "rgb(214, 220, 225)",
+      border: "rgb(48, 57, 64)",
+      borderStyle: "solid",
+      borderWidth: "1px",
+      radius: "12px",
+      weight: "400",
+      mention: "rgb(154, 182, 207)",
+    },
+  ],
+] as const) {
+  test(`GraphiteSoft ${mode} survives discovery and persistence without leaking across a theme switch`, async ({
+    page,
+  }) => {
+    await seed(page, { theme: { id: "oc-2", scheme: mode } })
+    await setupTimeline(page, {
+      messages: [
+        userMessage([
+          userText("Ask @explore about the graphite palette."),
+          {
+            id: "prt_graphite_agent",
+            type: "agent",
+            name: "explore",
+            source: { value: "@explore", start: 4, end: 12 },
+          },
+        ]),
+        assistantMessage(),
+      ],
+    })
+    const bubble = page.locator(`[data-message-id="${userID}"] [data-slot="user-message-text"]`)
+    const sessionURL = page.url()
+
+    const styles = () =>
+      bubble.evaluate((element) => ({
+        background: getComputedStyle(element).backgroundColor,
+        color: getComputedStyle(element).color,
+        border: getComputedStyle(element).borderTopColor,
+        borderStyle: getComputedStyle(element).borderTopStyle,
+        borderWidth: getComputedStyle(element).borderTopWidth,
+        radius: getComputedStyle(element).borderRadius,
+        weight: getComputedStyle(element).fontWeight,
+        mention: getComputedStyle(element.querySelector('[data-slot="user-message-mention-prefix"]')!).color,
+      }))
+
+    const selectTheme = async (name: string) => {
+      await page.goto("/settings?tab=appearance")
+      const picker = page.locator('[data-action="settings-theme"]')
+
+      await picker.click()
+      await page.getByRole("option", { name, exact: true }).click()
+      await expect(picker).toContainText(name)
+      await page.goto(sessionURL)
+    }
+
+    const baseline = await styles()
+
+    await selectTheme("GraphiteSoft")
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite-soft")
+    await expect.poll(styles).toEqual(expected)
+    await expect
+      .poll(() =>
+        page.evaluate(() => [
+          localStorage.getItem("opencode-theme-css-light"),
+          localStorage.getItem("opencode-theme-css-dark"),
+        ]),
+      )
+      .toEqual([
+        expect.stringContaining("--v2-background-bg-user-message"),
+        expect.stringContaining("--v2-background-bg-user-message"),
+      ])
+
+    await page.addInitScript(() => {
+      ;(window as typeof window & { themePreloadObserved?: boolean }).themePreloadObserved = false
+      new MutationObserver((records) => {
+        if (
+          records.some((record) =>
+            [...record.addedNodes].some((node) => node instanceof Element && node.id === "oc-theme-preload"),
+          )
+        ) {
+          ;(window as typeof window & { themePreloadObserved?: boolean }).themePreloadObserved = true
+        }
+      }).observe(document, { childList: true, subtree: true })
+    })
+    await page.reload()
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "graphite-soft")
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as typeof window & { themePreloadObserved?: boolean }).themePreloadObserved),
+      )
+      .toBe(true)
+    await expect.poll(styles).toEqual(expected)
+
+    await selectTheme("OpenCode")
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "oc-2")
+    await expect.poll(styles).toEqual(baseline)
+  })
+}
 const contextSelector = `[data-timeline-part-ids="${contextTools.map((tool) => tool.id).join(",")}"]`
 const output = (tool: string) => `Completed ${tool}.\n${"detail line\n".repeat(8)}`
 
@@ -279,6 +396,104 @@ test("keeps a file diff anchored while it expands and collapses", async ({ page 
   await expect(diff).toBeVisible()
   await expect.poll(measured).toBeLessThanOrEqual(1)
   await expect.poll(bottom).toBeLessThanOrEqual(1)
+})
+
+test("resizes aligned session content from either logical edge and restores the responsive width", async ({ page }) => {
+  await setupTimeline(page, { viewport: { width: 1600, height: 900 }, seedHistory: true })
+
+  const content = page.locator(`[data-message-id="${userID}"]`)
+  const composer = page.locator('[data-component="session-composer-dock"] > div')
+  const panel = page.locator('[data-slot="session-chat-panel"]')
+  const scroller = page.locator('[data-slot="session-timeline-scroll"]')
+  const start = page.getByRole("separator", { name: "Resize session content from the start edge" })
+  const end = page.getByRole("separator", { name: "Resize session content from the end edge" })
+  await expect(start).toBeVisible()
+  await expect(end).toHaveCSS("cursor", "col-resize")
+  await expect(end).toHaveAttribute("aria-orientation", "vertical")
+  await expect(end).toHaveAttribute("aria-controls", `session-content-${sessionID}`)
+
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await expect.poll(() => width(composer)).toBeCloseTo(800, 0)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await expect.poll(() => width(composer)).toBeCloseTo(1000, 0)
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect.poll(() => bottomDistance(scroller)).toBeLessThanOrEqual(1)
+
+  const initial = await width(content)
+  const initialCenter = await center(content)
+  await end.focus()
+  await end.press("ArrowRight")
+  await expect.poll(() => width(content)).toBeCloseTo(initial + 20, 0)
+  await expect.poll(() => center(content)).toBeCloseTo(initialCenter, 0)
+  await end.press("Enter")
+  await expect.poll(() => width(content)).toBeCloseTo(initial, 0)
+  await drag(page, end, 120)
+  await expect.poll(() => width(content)).toBeGreaterThan(initial + 200)
+  await expect.poll(() => center(content)).toBeCloseTo(initialCenter, 0)
+  await expect.poll(() => bottomDistance(scroller)).toBeLessThanOrEqual(1)
+  await expect.poll(() => rowHeightMismatches(scroller)).toBe(0)
+  const resized = await width(content)
+  await expect.poll(async () => Math.abs((await width(composer)) - resized)).toBeLessThan(2)
+
+  await page.reload()
+  await expect(content).toBeVisible()
+  await expect.poll(() => width(content)).toBeCloseTo(resized, 0)
+
+  await end.dblclick()
+  await expect.poll(() => width(content)).toBeCloseTo(initial, 0)
+  await drag(page, start, -120)
+  await expect.poll(() => width(content)).toBeGreaterThan(initial + 200)
+
+  await page.locator("html").evaluate((element) => element.setAttribute("dir", "rtl"))
+  await end.dblclick()
+  await end.press("ArrowLeft")
+  await expect.poll(() => width(content)).toBeCloseTo(initial + 20, 0)
+  await end.press("Enter")
+  await start.press("ArrowRight")
+  await expect.poll(() => width(content)).toBeCloseTo(initial + 20, 0)
+  await start.press("Enter")
+  await drag(page, end, -120)
+  await expect.poll(() => width(content)).toBeGreaterThan(initial + 200)
+  await end.press("Enter")
+  await drag(page, start, 120)
+  await expect.poll(() => width(content)).toBeGreaterThan(initial + 200)
+
+  const expanded = await width(content)
+  await page.getByRole("button", { name: "Toggle review", exact: true }).click()
+  await expect.poll(() => width(content)).toBeLessThan(expanded)
+  await expect.poll(async () => Math.abs((await width(composer)) - (await width(content)))).toBeLessThan(2)
+  await page.setViewportSize({ width: 930, height: 900 })
+  await expect
+    .poll(async () => Math.abs((await width(panel)) - (await width(content)) - 24))
+    .toBeLessThanOrEqual(1)
+
+  await page.locator("body").evaluate((element) => {
+    element.style.userSelect = "text"
+    element.style.overflow = "clip"
+  })
+  await end.hover()
+  await page.mouse.down()
+  await expect.poll(() => page.locator("body").evaluate((element) => element.style.userSelect)).toBe("none")
+  await page.evaluate(() => window.dispatchEvent(new Event("blur")))
+  await expect
+    .poll(() =>
+      page.locator("body").evaluate((element) => ({ userSelect: element.style.userSelect, overflow: element.style.overflow })),
+    )
+    .toEqual({ userSelect: "text", overflow: "clip" })
+  const cancelled = await width(content)
+  await page.mouse.move(100, 100)
+  await expect.poll(() => width(content)).toBeCloseTo(cancelled, 0)
+  await page.mouse.up()
+  await page.locator("body").evaluate((element) => {
+    element.style.userSelect = ""
+    element.style.overflow = ""
+  })
+
+  await page.setViewportSize({ width: 700, height: 900 })
+  await expect(start).toHaveCount(0)
+  await expect(end).toHaveCount(0)
 })
 
 for (const outline of [
@@ -559,4 +774,39 @@ async function captureCardEdges(page: Page, card: Locator) {
     },
     { source: `data:image/png;base64,${screenshot.toString("base64")}`, viewport, box },
   )
+}
+
+async function width(locator: Locator) {
+  return (await locator.boundingBox())?.width ?? 0
+}
+
+async function center(locator: Locator) {
+  const box = await locator.boundingBox()
+  return box ? box.x + box.width / 2 : 0
+}
+
+async function bottomDistance(locator: Locator) {
+  return locator.evaluate((element) => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))
+}
+
+async function rowHeightMismatches(locator: Locator) {
+  return locator.locator("[data-timeline-key]").evaluateAll(
+    (rows) =>
+      rows.filter((row) => {
+        const content = row.firstElementChild
+        if (!(content instanceof HTMLElement)) return true
+        return Math.abs(row.getBoundingClientRect().height - content.getBoundingClientRect().height) > 1
+      }).length,
+  )
+}
+
+async function drag(page: Page, handle: Locator, delta: number) {
+  const box = await handle.boundingBox()
+  if (!box) throw new Error("Session content resize handle is unavailable")
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + delta, y, { steps: 5 })
+  await page.mouse.up()
 }

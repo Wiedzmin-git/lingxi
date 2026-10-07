@@ -1,6 +1,7 @@
 import type { DesktopMenuAction } from "@opencode/app/desktop-menu"
 import type { DesktopNativeBundle } from "@opencode/app/i18n/desktop-native"
 import type { WindowBootstrap } from "../shared/window-bootstrap"
+import type { SessionLinkRequest, SessionLinkResult } from "@opencode/app/session-link"
 import type {
   ClipboardImage,
   DirectoryPickerOptions,
@@ -13,6 +14,7 @@ import type {
 } from "../shared/ipc-contract"
 
 export type ElectronAPI = {
+  sessionLink(request: SessionLinkRequest): Promise<SessionLinkResult>
   awaitInitialization(): Promise<ServerReadyData>
   reconnectService(): Promise<ServerReadyData>
   consumeInitialDeepLinks(): Promise<string[]>

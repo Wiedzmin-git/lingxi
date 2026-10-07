@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { LanguageModel, LLM, LLMEvent } from "@opencode/ai"
+import { LanguageModel, LLM, LLMEvent, Message } from "@opencode/ai"
 import { OpenAIChat } from "@opencode/ai/protocols/openai-chat"
 import { TestLLM } from "@opencode/ai/testing"
 import { Agent } from "@opencode/core/agent"
@@ -107,7 +107,7 @@ for (const fixture of [
           model,
           prepared: {
             retry: () => Effect.void,
-            request: LLM.request({ model: model.model, prompt: "Run one tool", toolChoice: fixture.toolChoice }),
+            request: LLM.request({ model: model.model, messages: [Message.make({ role: "user", id: "msg_exact_input", content: "Run one tool" }), Message.user("No persisted ID")], toolChoice: fixture.toolChoice }),
             options: {},
             executeTool: () =>
               Effect.sync(() => {
@@ -135,6 +135,7 @@ for (const fixture of [
         .where(eq(SessionMessageTable.id, assistantMessageID))
         .get()
       expect(message?.data).toMatchObject({
+        metadata: { requestMessageIDs: ["msg_exact_input"] },
         finish: fixture.finish,
         tokens: { input: 10, output: 4, reasoning: 2, cache: { read: 3, write: 2 } },
         snapshot: { start, end, files },
@@ -142,12 +143,13 @@ for (const fixture of [
       })
       expect(message?.data).toHaveProperty("cost", expect.closeTo(0.0000233, 10))
       const events = yield* db
-        .select({ type: EventTable.type })
+        .select({ type: EventTable.type, data: EventTable.data })
         .from(EventTable)
         .where(eq(EventTable.aggregate_id, sessionID))
         .orderBy(asc(EventTable.seq))
         .all()
       const types = events.map((event) => event.type)
+      expect(events.find((event) => event.type === "session.step.started.1")?.data).toMatchObject({ inputMessageIDs: ["msg_exact_input"] })
       const terminal = fixture.finish === "stop" ? "session.step.ended.1" : "session.step.failed.1"
       expect(types.filter((type) => type === "session.step.streamed.1")).toHaveLength(1)
       expect(types.filter((type) => type === terminal)).toHaveLength(1)

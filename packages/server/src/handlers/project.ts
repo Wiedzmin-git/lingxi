@@ -2,10 +2,15 @@ import { Project } from "@opencode/core/project"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
-import { ProjectNotFoundError } from "@opencode/protocol/errors"
+import { InvalidRequestError, ProjectNotFoundError } from "@opencode/protocol/errors"
 
 export const ProjectHandler = HttpApiBuilder.group(Api, "server.project", (handlers) =>
   handlers
+    .handle("project.create", (ctx) =>
+      Project.Service.use((project) =>
+        project.create(ctx.payload).pipe(Effect.mapError((error) => new InvalidRequestError({ message: error.message }))),
+      ),
+    )
     .handle("project.list", () => Project.Service.use((project) => project.list()))
     .handle("project.update", (ctx) =>
       Project.Service.use((project) =>

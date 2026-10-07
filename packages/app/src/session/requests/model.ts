@@ -105,22 +105,8 @@ export function createSessionRequestModel() {
     shells: () => data.shell.list({ directory: sdk().directory }),
   })
 
-  // Moving to the background and the extensions' background list stay with the primary session's own work.
-  const blocking = createMemo(() => (primary() ? running.blocking() : []))
+  // The extensions' background list stays with the primary session's own work.
   const tasks = createMemo(() => (primary() ? running.tasks() : []))
-
-  const moveToBackground = async () => {
-    if (!primary()) return
-    const sessionID = params.id
-
-    if (!sessionID) return
-    await serverSDK.api.session.background({ sessionID }).catch((error) => {
-      showToast({
-        title: language.t("common.requestFailed"),
-        description: error instanceof Error ? error.message : String(error),
-      })
-    })
-  }
 
   const [store, setStore] = createStore<{ responding: string | undefined }>({ responding: undefined })
 
@@ -160,10 +146,8 @@ export function createSessionRequestModel() {
     permissionRequest,
     permissionResponding,
     background: {
-      blocking,
       tasks,
       running: { sessionID: owner, blocking: running.blocking, tasks: running.tasks },
-      move: moveToBackground,
     },
     decide,
   }

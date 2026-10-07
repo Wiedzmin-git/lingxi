@@ -4,6 +4,7 @@
   "description": "",
   "type": "module",
   "exports": {
+    "./session-link": "./src/runtime/platform/session-link.ts",
     ".": "./src/index.ts",
     "./desktop": "./src/desktop.ts",
     "./desktop-menu": "./src/shell/commands/desktop-menu.ts",

@@ -31,6 +31,7 @@ import { SessionStore } from "@opencode/core/session/store"
 import { Permission } from "@opencode/core/permission"
 import { PermissionSaved } from "@opencode/core/permission/saved"
 import { Plugin } from "@opencode/core/plugin"
+import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Shell } from "@opencode/core/shell"
 import { ShellSelect } from "@opencode/core/shell/select"
@@ -175,7 +176,8 @@ const permissionIt = testEffect(
 const call = (input: typeof ShellTool.Input.Type, id = "call-shell") => ({
   sessionID,
   ...toolIdentity,
-  call: { type: "tool-call" as const, id, name: "shell", input },
+  // Existing synchronous contracts deliberately request the compatibility mode.
+  call: { type: "tool-call" as const, id, name: "shell", input: { background: false, ...input } },
 })
 
 const isWindows = process.platform === "win32"
@@ -847,6 +849,53 @@ describe("ShellTool ordinary shell syntax", () => {
 })
 
 describe("ShellTool", () => {
+  for (const fixture of [
+    { name: "short output", command: helloCommand, timeout: undefined, text: "hello", exit: 0 },
+    { name: "non-zero exit", command: bodyExitCommand, timeout: undefined, text: "Exited with code 7", exit: 7 },
+    { name: "explicit timeout", command: idleCommand, timeout: 50, text: "Timed out before completion", exit: undefined },
+  ]) {
+    it.live(`background by default: ${fixture.name} returns identity and delivers its actual result`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          return withSession(tmp.path, (registry) =>
+            Effect.gen(function* () {
+              const bus = yield* Bus.Service
+              const jobs = yield* Job.Service
+              const hooks = yield* PluginHooks.Service
+              const deadlines: number[] = []
+              yield* hooks.register("shell", "create.before", (event) => Effect.sync(() => deadlines.push(event.timeout)))
+              const admitted = yield* bus.subscribe(SessionEvent.InboxEnqueued).pipe(
+                Stream.filter((event) => event.data.sessionID === sessionID && event.data.item.type === "synthetic"),
+                Stream.runHead,
+                Effect.forkScoped({ startImmediately: true }),
+              )
+              const settled = yield* executeTool(registry, {
+                sessionID,
+                ...toolIdentity,
+                call: { type: "tool-call", id: "call-default-background", name: "shell",
+                  input: { command: fixture.command, ...(fixture.timeout === undefined ? {} : { timeout: fixture.timeout }) } },
+              })
+              expect(settled.metadata).toMatchObject({ status: "running", truncated: false })
+              const shellID = settled.metadata?.shellID
+              if (typeof shellID !== "string") return yield* Effect.die("Expected exact shell ID")
+              expect(deadlines).toEqual([fixture.timeout ?? ShellTool.DEFAULT_TIMEOUT_MS])
+              expect(yield* jobs.backgroundAll({ sessionID })).toEqual([])
+              const notification = (yield* Fiber.join(admitted)).valueOrUndefined?.data.item
+              expect(notification?.type).toBe("synthetic")
+              if (notification?.type !== "synthetic") return yield* Effect.die("Expected completion notification")
+              expect(notification.payload.text).toContain(fixture.text)
+              expect(notification.payload.metadata).toMatchObject({ source: "shell", shellID, jobID: shellID,
+                state: "completed", ...(fixture.exit === undefined ? { timeout: true } : { exit: fixture.exit }) })
+            }),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+      ),
+    )
+  }
+
   it.live("returns both parallel CodeMode shell results", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -860,7 +909,9 @@ describe("ShellTool", () => {
               }),
             )
             const command = isWindows ? helloCommand : `${helloCommand}; sleep 0.1`
-            const inputs = ["one", "two"].map((text) => JSON.stringify({ command: command.replace("hello", text) }))
+            const inputs = ["one", "two"].map((text) =>
+              JSON.stringify({ command: command.replace("hello", text), background: false }),
+            )
             const result = yield* executeTool(registry, {
               sessionID,
               ...toolIdentity,

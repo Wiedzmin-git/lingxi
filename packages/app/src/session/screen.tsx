@@ -18,6 +18,7 @@ import { ComposerDropzone } from "@/composer/dropzone"
 import type { SessionModel } from "@/session/model"
 import { SESSION_PANEL_WIDTH_MIN } from "@/session/session-panel-width"
 import { SessionPanelFrame } from "@/session/session-frame"
+import { useLanguage } from "@/runtime/i18n/language"
 import { useExtensionHost } from "@/runtime/extension/host"
 import { ExtensionLinks } from "@/runtime/extension/render"
 import { createPanelSidebar, createRegion, DockRegion, MobilePanel } from "@/runtime/extension/panels"
@@ -36,6 +37,8 @@ import { SessionIdentityHeader } from "./session-identity-header"
 import { SessionReviewToggle } from "./header/session-header-actions"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createTimelineCache } from "./timeline/cache"
+import { MessageQuotes } from "./timeline/message-quotes"
+import { GenerationSpeedIndicator } from "./generation-speed-indicator"
 
 export function SessionScreenView(props: { session: SessionModel }) {
   // The timeline cache captures its owner when created, so link handling must be provided above it.
@@ -61,6 +64,11 @@ function SessionScreenContent(props: {
   bindBackground: (tasks: () => readonly BackgroundTask[]) => void
 }) {
   const session = props.session
+  const language = useLanguage()
+  const contentID = createMemo(() => {
+    const id = session.identity.sessionID()
+    return id ? `session-content-${id}` : undefined
+  })
   const host = useExtensionHost()
   const attachment = useExtensionAttachment()
   const isDesktop = session.isDesktop
@@ -277,6 +285,7 @@ function SessionScreenContent(props: {
     <>
       <ComposerDropzone
         active={composer.drop.active()}
+        reference={composer.drop.reference()}
         input={composer.drop.input()}
         identity={session.layout.tabKey}
       />
@@ -340,6 +349,7 @@ function SessionScreenContent(props: {
         </Switch>
       </div>
 
+      <GenerationSpeedIndicator sessionID={session.identity.sessionID} active={conversationVisible} />
       <Show when={composer.active()} keyed>
         {(model) => <ActiveSessionComposerRegion model={model} suggestionBoundary={timeline.scroller} />}
       </Show>
@@ -349,6 +359,13 @@ function SessionScreenContent(props: {
   return (
     <>
       <div class="flex-1 min-h-0 flex flex-col gap-2 px-2 pb-[var(--shell-bottom-inset,8px)] pt-[var(--shell-top-inset,8px)]">
+        <MessageQuotes
+          sessionID={session.identity.sessionID}
+          scroller={timeline.scroller}
+          enabled={() => conversationVisible() && !session.data.isChild()}
+          onSelect={timeline.view.unpin}
+          revealMessage={timeline.actions.revealMessage}
+        />
         <div ref={screen.panel.ref} class="relative flex-1 min-h-0 flex flex-col md:flex-row gap-2">
           {/* Keep the control outside panel animations; a side dock's 52px header includes a 1px divider. */}
           <Show when={isDesktop() && messagesReady() && session.identity.params.id}>
@@ -363,6 +380,8 @@ function SessionScreenContent(props: {
             </div>
           </Show>
           <div
+            ref={screen.content.ref}
+            id={contentID()}
             classList={{
               "@container relative z-10 min-w-0 shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none transition-[width]": true,
               "duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] will-change-[width] motion-reduce:transition-none":
@@ -379,12 +398,70 @@ function SessionScreenContent(props: {
             onTransitionRun={trackSideWidthMotion}
             onTransitionEnd={trackSideWidthMotion}
             onTransitionCancel={trackSideWidthMotion}
-            style={{ width: screen.panel.width() }}
+            style={{ width: screen.panel.width(), "--session-content-width": `${screen.content.width()}px` }}
           >
             <Show when={!!session.identity.params.id}>
               <SessionPanelFrame raised>
                 <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary>
               </SessionPanelFrame>
+            </Show>
+
+            <Show when={!!session.identity.params.id && screen.content.resizable()}>
+              <div
+                class="absolute inset-y-0 left-1/2 z-[70] -translate-x-1/2 pointer-events-none"
+                style={{ width: `${screen.content.width()}px`, "max-width": "100%" }}
+              >
+                <ResizeHandle
+                  class="pointer-events-auto"
+                  direction="horizontal"
+                  edge="start"
+                  size={screen.content.width() / 2}
+                  min={screen.content.min() / 2}
+                  max={screen.content.max() / 2}
+                  role="separator"
+                  tabIndex={0}
+                  aria-orientation="vertical"
+                  aria-label={language.t("session.content.resize.start")}
+                  aria-description={language.t("session.content.resize.description")}
+                  aria-controls={contentID()}
+                  aria-valuemin={screen.content.min()}
+                  aria-valuemax={screen.content.max()}
+                  aria-valuenow={screen.content.width()}
+                  keyboardStep={10}
+                  onResizeStart={() => screen.size.start()}
+                  onDblClick={() => screen.content.resize()}
+                  onReset={() => screen.content.resize()}
+                  onResize={(width) => {
+                    screen.size.touch()
+                    screen.content.resize(width * 2)
+                  }}
+                />
+                <ResizeHandle
+                  class="pointer-events-auto"
+                  direction="horizontal"
+                  edge="end"
+                  size={screen.content.width() / 2}
+                  min={screen.content.min() / 2}
+                  max={screen.content.max() / 2}
+                  role="separator"
+                  tabIndex={0}
+                  aria-orientation="vertical"
+                  aria-label={language.t("session.content.resize.end")}
+                  aria-description={language.t("session.content.resize.description")}
+                  aria-controls={contentID()}
+                  aria-valuemin={screen.content.min()}
+                  aria-valuemax={screen.content.max()}
+                  aria-valuenow={screen.content.width()}
+                  keyboardStep={10}
+                  onResizeStart={() => screen.size.start()}
+                  onDblClick={() => screen.content.resize()}
+                  onReset={() => screen.content.resize()}
+                  onResize={(width) => {
+                    screen.size.touch()
+                    screen.content.resize(width * 2)
+                  }}
+                />
+              </div>
             </Show>
 
             <Show when={screen.panel.resizable()}>

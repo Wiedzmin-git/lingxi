@@ -38,7 +38,7 @@ type PersistTarget = {
 // oxlint-disable-next-line anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns -- see SAFETY above
 type PickPart = (value: unknown) => unknown
 
-type CopyFrom = { key: string; storage?: string; pick?: PickPart }
+type CopyFrom = { key: string; storage?: string; draft?: boolean; namespaceOnly?: boolean; pick?: PickPart }
 
 const GLOBAL_STORAGE = "opencode.global.dat"
 
@@ -577,9 +577,16 @@ export function removePersisted(
   target.workspaceStorageAliases?.forEach((name) => void open(name)?.removeItem(target.key))
   copies.forEach((copy) => {
     if (copy.pick) return
+
+    if (copy.draft) {
+      void platform?.draftStore?.removeItem(`${copy.storage ?? "default"}:${copy.key}`)
+
+      return
+    }
+
     void open(copy.storage ?? target.storage)?.removeItem(copy.key)
 
-    if (target.storage) void open(undefined)?.removeItem(copy.key)
+    if (target.storage && !copy.namespaceOnly) void open(undefined)?.removeItem(copy.key)
   })
 }
 
@@ -637,9 +644,9 @@ export function persisted<S extends Schema.ConstraintCodec<object, unknown>>(
       const sources: RelocationSource<SyncStorage>[] = [
         ...workspaceAliases.map((storage) => ({ storage: localStorageWithPrefix(storage) })),
         ...(config.previousKey ? [{ storage: localStorageDirect(), key: config.previousKey }] : []),
-        ...(config.copyFrom ?? []).flatMap((copy) => [
+        ...(config.copyFrom ?? []).filter((copy) => !copy.draft).flatMap((copy) => [
           { storage: copy.storage ? localStorageWithPrefix(copy.storage) : current, key: copy.key, pick: copy.pick },
-          ...(config.storage ? [{ storage: localStorageDirect(), key: copy.key, pick: copy.pick }] : []),
+          ...(config.storage && !copy.namespaceOnly ? [{ storage: localStorageDirect(), key: copy.key, pick: copy.pick }] : []),
         ]),
       ]
 
@@ -688,15 +695,21 @@ export function persisted<S extends Schema.ConstraintCodec<object, unknown>>(
       previousStorage && config.previousKey ? { storage: previousStorage, key: config.previousKey } : undefined,
       ...(config.copyFrom ?? []).flatMap((copy) => [
         {
-          storage: copy.storage
-            ? isDesktop
-              ? platform.storage?.(copy.storage)
-              : localStorageWithPrefix(copy.storage)
-            : current,
+          storage: copy.draft
+            ? draft && {
+                getItem: (key: string) => draft.getItem(`${copy.storage ?? "default"}:${key}`),
+                setItem: (key: string, value: string) => draft.setItem(`${copy.storage ?? "default"}:${key}`, value),
+                removeItem: (key: string) => draft.removeItem(`${copy.storage ?? "default"}:${key}`),
+              }
+            : copy.storage
+              ? isDesktop
+                ? platform.storage?.(copy.storage)
+                : localStorageWithPrefix(copy.storage)
+              : current,
           key: copy.key,
           pick: copy.pick,
         },
-        config.storage
+        config.storage && !copy.draft && !copy.namespaceOnly
           ? { storage: isDesktop ? platform.storage?.() : localStorageDirect(), key: copy.key, pick: copy.pick }
           : undefined,
       ]),

@@ -22,6 +22,8 @@ import {
 } from "../suggestions/machine"
 import { clonePrompt, isAttachment, promptLength } from "../prompt-parts"
 import type { ComposerQueue } from "../adapter"
+import { readSessionReferenceDrag, SESSION_REFERENCE_MIME } from "../session-reference"
+import { getCursorPosition, setCursorPosition } from "./dom"
 
 export type ComposerSelectControl = {
   options: Accessor<ComposerOption[]>
@@ -69,6 +71,7 @@ export function createComposerEditor(input: {
   onEditor?: (element: HTMLElement) => void
   onSuggestionSelect?: (item: ComposerSuggestion) => (() => void) | void
   view: ComposerEditorView
+  referenceServer?: Accessor<string>
   attachments?: ComposerAttachmentConfig
 }) {
   let editor: HTMLElement | undefined
@@ -101,7 +104,7 @@ export function createComposerEditor(input: {
         editor: () => editor,
         focusEditor: () => editor?.focus(),
         addPart,
-        setDraggingType: (type) => dispatch({ type: type ? "drag.enter" : "drag.leave" }),
+        setDraggingType: (type) => dispatch(type ? { type: "drag.enter", reference: type === "reference" } : { type: "drag.leave" }),
       })
     : undefined
 
@@ -515,10 +518,11 @@ export function createComposerEditor(input: {
     },
     onDragEnter(event: DragEvent) {
       event.preventDefault()
-      dispatch({ type: "drag.enter" })
+      dispatch({ type: "drag.enter", reference: event.dataTransfer?.types.includes(SESSION_REFERENCE_MIME) })
     },
     onDragOver(event: DragEvent) {
       event.preventDefault()
+      if (event.dataTransfer?.types.includes(SESSION_REFERENCE_MIME)) event.dataTransfer.dropEffect = "copy"
     },
     onDragLeave() {
       dispatch({ type: "drag.leave" })
@@ -526,6 +530,25 @@ export function createComposerEditor(input: {
     onDrop(event: DragEvent) {
       event.preventDefault()
       dispatch({ type: "drag.leave" })
+
+      if (event.dataTransfer?.types.includes(SESSION_REFERENCE_MIME)) {
+        event.stopPropagation()
+        if (!editor || state.mode !== "normal" || !input.referenceServer) return
+        const reference = readSessionReferenceDrag(event, input.referenceServer())
+        if (!reference) return
+        const range = document.caretRangeFromPoint(event.clientX, event.clientY)
+        const selection = window.getSelection()
+        if (range && editor.contains(range.startContainer)) {
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+        }
+        const cursor = range && editor.contains(range.startContainer)
+          ? getCursorPosition(editor) : draft.state.cursor ?? promptLength(draft.state.prompt)
+        draft.addMention(reference, { start: cursor, end: cursor })
+        editor.focus()
+        setCursorPosition(editor, draft.state.cursor ?? promptLength(draft.state.prompt))
+        return
+      }
 
       if (attachments) {
         event.stopPropagation()

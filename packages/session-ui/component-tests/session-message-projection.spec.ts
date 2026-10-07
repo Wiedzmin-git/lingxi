@@ -1,5 +1,26 @@
 import { expect, story } from "../../storybook/playwright/story"
 
+// The fixed width is the owner's explicit contract; existing content tests do not measure it.
+story("keeps short and long user bubbles equally wide on the right, responsive to chat width", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 })
+  const root = await mount("current-session-timeline-rows--user-bubble-widths")
+  const bubbles = root.locator('[data-slot="user-message-text"]')
+  await expect(bubbles).toHaveCount(2)
+  await expect(bubbles.nth(0)).toHaveText("ок")
+  for (const viewport of [{ width: 1200, height: 900 }, { width: 390, height: 900 }]) {
+    await page.setViewportSize(viewport)
+    await expect.poll(() => bubbles.evaluateAll((elements) => elements.every((element) => {
+      const bubble = element.getBoundingClientRect()
+      const parent = element.closest('[data-component="user-message"]')!.getBoundingClientRect()
+      const ratio = parent.width <= 480 ? 0.96 : 2 / 3
+      return Math.abs(bubble.width - parent.width * ratio) < 1 && Math.abs(bubble.right - parent.right) < 1
+    }))).toBe(true)
+    const [short, long] = await Promise.all([bubbles.nth(0).boundingBox(), bubbles.nth(1).boundingBox()])
+    expect(short!.width).toBeCloseTo(long!.width, 0)
+    expect(long!.height).toBeGreaterThan(short!.height)
+  }
+})
+
 // Moved from packages/app/e2e/regression/session-timeline-collapse-state.spec.ts
 story("keeps a manually collapsed tool collapsed when later assistant content streams", async ({ mount }) => {
   const timeline = await mount("current-session-file-changes--changing-files", { args: { scenario: "streaming" } })

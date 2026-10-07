@@ -43,6 +43,29 @@ export const AgentThinking = {
   render: () => <AgentReasoningStory mode="compact" reasoning="heading" tool={false} text="" />,
 }
 
+export const UserBubbleWidths = {
+  render: () => {
+    const document = {
+      sessionID: CURRENT_SESSION_ID,
+      messages: ["ок", "A longer prompt with enough content to wrap. ".repeat(24)].map((text, index) => ({
+        id: `msg_bubble_${index}`,
+        type: "user" as const,
+        text,
+        time: { created: STORY_TIME + index },
+      })),
+      status: { type: "idle" as const },
+      diffs: [],
+    } satisfies SessionDocument
+    return (
+      <section class="mx-auto w-full max-w-[900px] p-6">
+        <CurrentSessionProviders document={document}>
+          <SessionTimeline document={document} />
+        </CurrentSessionProviders>
+      </section>
+    )
+  },
+}
+
 export const StreamingReasoningAndText = {
   render: () => (
     <CurrentSessionTimelineStory

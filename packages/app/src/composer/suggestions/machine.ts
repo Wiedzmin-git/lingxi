@@ -8,7 +8,7 @@ export type ComposerInteractionState = {
     | { type: "context"; query: string; activeID?: string }
     | { type: "command-inline"; query: string; activeID?: string }
     | { type: "command-menu"; query: string; activeID?: string }
-  drag: "idle" | "active"
+  drag: "idle" | "active" | "reference"
   focus: "editor" | "command-search" | "external"
   activeContextID?: string
   historyIndex: number
@@ -27,7 +27,7 @@ export type ComposerInteractionEvent =
   | { type: "key.down"; key: string; ctrl: boolean; composing: boolean; ids: string[]; empty?: boolean }
   | { type: "mode.shell" }
   | { type: "mode.normal" }
-  | { type: "drag.enter" }
+  | { type: "drag.enter"; reference?: boolean }
   | { type: "drag.leave" }
   | { type: "focus.editor" }
   | { type: "focus.external" }
@@ -74,7 +74,7 @@ export function transitionComposer(
   if (event.type === "key.down") return keyDown(state, event)
   if (event.type === "mode.shell") return changed({ ...state, mode: "shell", popover: { type: "closed" } })
   if (event.type === "mode.normal") return changed({ ...state, mode: "normal" })
-  if (event.type === "drag.enter") return changed({ ...state, drag: "active" })
+  if (event.type === "drag.enter") return changed({ ...state, drag: event.reference ? "reference" : "active" })
   if (event.type === "drag.leave") return changed({ ...state, drag: "idle" })
   if (event.type === "focus.editor") return changed({ ...state, focus: "editor" })
   if (event.type === "context.active") {

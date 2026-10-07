@@ -10,6 +10,7 @@ import type {
   PathAttachmentPart,
   Prompt,
   SkillPart,
+  SessionReferencePart,
 } from "@/composer/state"
 import {
   formatAttachmentReference,
@@ -34,6 +35,7 @@ type PromptRequest = {
   skills: { id: string; name: string; mention?: { start: number; end: number; text: string } }[]
   comments: PromptComment[]
   attachments: PromptAttachmentReference[]
+  sessionReferences?: SessionReferencePart[]
 }
 
 type BuildPromptRequestInput = {
@@ -77,6 +79,10 @@ const isSkillAttachment = (part: Prompt[number]): part is SkillPart => part.type
 
 const isPathAttachment = (part: Prompt[number]): part is PathAttachmentPart => part.type === "path"
 
+export function formatSessionReference(part: SessionReferencePart) {
+  return `Branch reference at user-text characters ${part.start}..${part.end}: ${JSON.stringify({ title: part.title, sessionID: part.sessionID, server: part.server ?? null })}. The ID belongs only to the named originating server; never reinterpret it on another server or recreate a missing target.`
+}
+
 /** The sent form of a note: its optional link and live subject travel only when present. */
 export function noteComment(item: NoteContextItem, comment: string) {
   const note: NoteComment = {
@@ -92,10 +98,13 @@ export function noteComment(item: NoteContextItem, comment: string) {
 
   if (item.live) note.live = { ...item.live }
 
+  if (item.quote) note.quote = { ...item.quote }
+
   return note
 }
 
 export function buildPromptRequest(input: BuildPromptRequestInput): PromptRequest {
+  const sessionReferences = input.prompt.filter((part): part is SessionReferencePart => part.type === "session")
   const skills = input.prompt.filter(isSkillAttachment).map((attachment) => ({
     id: attachment.id,
     name: attachment.name,
@@ -178,6 +187,7 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
   return {
     text: [
       ...(input.text.trim() ? [input.text] : []),
+      ...sessionReferences.map(formatSessionReference),
       ...attachments.map(formatAttachmentReference),
       ...comments.map((comment) => (comment.type === "note" ? formatNoteComment(comment) : formatCommentNote(comment))),
     ].join("\n"),
@@ -187,5 +197,6 @@ export function buildPromptRequest(input: BuildPromptRequestInput): PromptReques
     skills,
     comments,
     attachments,
+    ...(sessionReferences.length ? { sessionReferences } : {}),
   }
 }

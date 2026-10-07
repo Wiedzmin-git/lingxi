@@ -10,3 +10,4 @@ export function mergeVisibleTabOrder(all: string[], current: string[], next: str
   const reordered = next.values()
   return all.map((key) => (visible.has(key) ? (reordered.next().value ?? key) : key))
 }
+export const SESSION_TAB_DRAG_MIME = "application/x-opencode-session-tab"

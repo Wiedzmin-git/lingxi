@@ -2,6 +2,8 @@ import type { Page } from "@playwright/test"
 import type { OpenCodeEvent, SessionMessageInfo } from "@opencode/client/promise"
 import { Permission } from "@opencode/schema/permission"
 import { Worktree } from "@opencode/schema/worktree"
+import type { Project } from "@opencode/schema/project"
+import { containsDirectory } from "@opencode/util/path"
 import { Duration, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
@@ -61,6 +63,10 @@ export interface MockServerConfig {
   project: unknown
   // Replaces the `/api/project` inventory, which defaults to `[project]`.
   projects?: Resolvable<unknown[]>
+  onProjectCreate?: (input: Project.CreateInput) => { directory: string } | Promise<{ directory: string }>
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- Fixture responses remain opaque until the real generated client decodes the wire contract.
+  onProjectUpdate?: (input: { projectID: string; body: unknown }) => unknown
+  onSessionMove?: (input: { sessionID: string; directory: string }) => void
   sessions: MockSession[]
   pageMessages: (
     sessionId: string,
@@ -887,13 +893,20 @@ function mockHandlers(
 
             return [{ ...projectFields(config), canonical: seed?.canonical ?? seed?.worktree ?? config.directory }]
           }),
+        projectCreate: (ctx) => {
+          const create = config.onProjectCreate
+
+          if (!create) return unsupported("create project directories", "onProjectCreate")
+
+          return Effect.promise(async () => create(ctx.payload))
+        },
         projectUpdate: (ctx) =>
-          Effect.succeed({
+          Effect.sync(() => config.onProjectUpdate?.({ projectID: ctx.params.projectID, body: ctx.payload }) ?? ({
             ...projectFields(config),
             ...ctx.payload,
             id: ctx.params.projectID,
             canonical: projectSeed(config)?.canonical ?? config.directory,
-          }),
+          })),
         configShells: () => Effect.succeed(config.shells ?? []),
         configUpdate: () => noContent,
         websearchProviders: () => Effect.succeed({ location: location(config), data: [] }),
@@ -1148,6 +1161,13 @@ function mockHandlers(
               : Effect.fail(new MockNotFound({ message: "Session not found" }))
           }),
         sessionRemove: () => noContent,
+        sessionMove: (ctx) => {
+          const move = config.onSessionMove
+
+          if (!move) return unsupported("move sessions", "onSessionMove")
+
+          return Effect.sync(() => move({ sessionID: ctx.params.sessionID, directory: ctx.payload.directory })).pipe(Effect.andThen(noContent))
+        },
         sessionShell: () => noContent,
         sessionForm: (ctx) =>
           Effect.succeed({
@@ -1338,9 +1358,16 @@ function mockHandlers(
 
 // The requested workspace (directory) inside the configured project.
 function location(config: MockServerConfig, directory = config.directory) {
+  const project = (config.projects ? resolve(config.projects) : []).flatMap((item) => Option.toArray(decodeProject(item)))
+    .filter((item) => containsDirectory(item.canonical ?? item.worktree ?? "", directory))
+    .toSorted((a, b) => (b.canonical ?? b.worktree ?? "").length - (a.canonical ?? a.worktree ?? "").length)[0]
+    ?? projectSeed(config)
+
+  const canonical = project?.canonical ?? project?.worktree ?? config.directory
+
   return {
     directory,
-    project: { id: projectSeed(config)?.id, directory: config.directory, canonical: config.directory },
+    project: { id: project?.id, directory: canonical, canonical },
   }
 }
 

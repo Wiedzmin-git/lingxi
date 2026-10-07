@@ -8,7 +8,7 @@ import { useI18n } from "@opencode/ui/context/i18n"
 import { Option, Predicate, Schema } from "effect"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
+import type { SessionUserActions, SessionUserAttachmentReference, SessionUserBranchReference, SessionUserComment } from "../actions"
 import { useData } from "../context"
 import { TimelineSeparator } from "../components/timeline-separator"
 import {
@@ -28,6 +28,7 @@ import {
 import type { ContextGroupPart } from "../tools/tool-renderer"
 import { SessionRetry } from "../components/session-retry"
 import { SessionError } from "../components/session-error"
+import { MessageTimestamp } from "../components/message-timestamp"
 import { timelineCategory, type TimelineDetail } from "./detail"
 import { currentToolFailed } from "../message/current-tool-state"
 import {
@@ -51,6 +52,7 @@ export type SessionUserPresentation = {
   displayText?: string
   comments?: SessionUserComment[]
   references?: SessionUserAttachmentReference[]
+  sessionReferences?: SessionUserBranchReference[]
 }
 
 export function createSessionTimelineRowRenderer(input: {
@@ -63,6 +65,7 @@ export function createSessionTimelineRowRenderer(input: {
   shellToolDefaultOpen: Accessor<boolean>
   editToolDefaultOpen: Accessor<boolean>
   timelineDetail?: Accessor<TimelineDetail>
+  showMessageTimestamps?: Accessor<boolean>
   disclosure: {
     value: (key: string) => boolean | undefined
     set: (key: string, open: boolean) => void
@@ -460,24 +463,60 @@ export function createSessionTimelineRowRenderer(input: {
     return { label: message.description ?? message.text }
   }
 
-  const Frame = (props: { row: FramedTimelineRow; children: JSX.Element }) => (
-    <div
-      id={Predicate.isTagged(props.row, "UserMessage") ? input.anchor?.(props.row.userMessageID) : undefined}
-      data-message-id={props.row.userMessageID}
-      data-timeline-row={props.row._tag}
-      data-timeline-spacing={Predicate.isTagged(props.row, "AssistantPart") ? props.row.spacing : undefined}
-      classList={{
-        "min-w-0 w-full max-w-full": true,
-        "md:max-w-[1000px] md:mx-auto": input.centered?.(),
-        "pt-2": Predicate.isTagged(props.row, "AssistantPart") && props.row.spacing === "tool",
-        "pt-4": Predicate.isTagged(props.row, "AssistantPart") && props.row.spacing === "content",
-      }}
-    >
-      <div data-component="session-turn" class="min-w-0 w-full relative" style={{ height: "auto" }}>
-        {props.children}
+  const Frame = (props: { row: FramedTimelineRow; children: JSX.Element }) => {
+    const stamp = createMemo(() => {
+      if (!input.showMessageTimestamps?.()) return
+      const row = props.row
+      if (Predicate.isTagged(row, "UserMessage"))
+        return input.projection.messageByID().get(row.userMessageID)?.time.created
+      if (Predicate.isTagged(row, "Notice")) {
+        const message = input.projection.messageByID().get(row.messageID)
+        return message?.type === "synthetic" ? message.time.created : undefined
+      }
+      if (!Predicate.isTagged(row, "AssistantPart") || row.group.type !== "part") return
+      const message = input.projection.messageByID().get(row.group.ref.messageID)
+      if (message?.type !== "assistant") return
+      const content = Timeline.resolveContent(message, row.group.ref.partID)
+      // Stamp the first visible text once, not every tool/reasoning row in a step.
+      if (
+        content?.type !== "text" ||
+        content !== message.content.find((part) => part.type === "text" && part.text.trim())
+      )
+        return
+      return message.time.created
+    })
+    return (
+      <div
+        id={Predicate.isTagged(props.row, "UserMessage") ? input.anchor?.(props.row.userMessageID) : undefined}
+        data-message-id={props.row.userMessageID}
+        data-timeline-row={props.row._tag}
+        data-timeline-spacing={Predicate.isTagged(props.row, "AssistantPart") ? props.row.spacing : undefined}
+        classList={{
+          "min-w-0 w-full max-w-full": true,
+          "session-message-stamped": stamp() !== undefined,
+          "md:max-w-[var(--session-content-width,1000px)] md:mx-auto": input.centered?.(),
+          "pt-2": Predicate.isTagged(props.row, "AssistantPart") && props.row.spacing === "tool",
+          "pt-4": Predicate.isTagged(props.row, "AssistantPart") && props.row.spacing === "content",
+        }}
+      >
+        <div
+          data-component="session-turn"
+          class="min-w-0 w-full relative"
+          style={{ height: "auto", "flex-direction": stamp() !== undefined ? "column" : undefined }}
+        >
+          <Show when={stamp() !== undefined}>
+            <div
+              class={`w-full min-w-0 ${padding()}`}
+              classList={{ "text-end": Predicate.isTagged(props.row, "UserMessage") }}
+            >
+              <MessageTimestamp created={stamp()!} />
+            </div>
+          </Show>
+          {props.children}
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   function Notice(props: { messageID: string; grouped?: boolean }) {
     const inset = () => (props.grouped ? "" : padding())
@@ -569,7 +608,12 @@ export function createSessionTimelineRowRenderer(input: {
           {(message) => (
             <div data-slot="session-turn-message-container" class={`w-full ${inset()}`}>
               <div data-slot="session-turn-compaction">
-                <SessionCompactionMessage message={message()} error={compactionError()} />
+                <SessionCompactionMessage
+                  message={message()}
+                  error={compactionError()}
+                  open={input.disclosure.value(`compaction-summary:${message().id}`) ?? false}
+                  onOpenChange={(open) => input.disclosure.set(`compaction-summary:${message().id}`, open)}
+                />
               </div>
             </div>
           )}
@@ -730,9 +774,11 @@ export function createSessionTimelineRowRenderer(input: {
                       displayText={presentation()?.displayText}
                       comments={presentation()?.comments}
                       references={presentation()?.references}
+                      sessionReferences={presentation()?.sessionReferences}
                       historicalAgent={context()?.agent ?? ""}
                       historicalModel={context()?.model ?? { id: "", providerID: "" }}
                       actions={input.actions}
+                      showDateTime={input.showMessageTimestamps?.()}
                     />
                   </div>
                 </div>

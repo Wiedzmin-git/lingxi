@@ -682,7 +682,7 @@ export type SessionLogOutput =
                 readonly workspaceID?: (string & Brand.Brand<"Workspace.ID">) | undefined
               }
             | undefined
-          readonly data: { readonly sessionID: Session.ID }
+          readonly data: { readonly sessionID: Session.ID; readonly executionID?: Event.ID | undefined }
         }
       | {
           readonly id: Event.ID
@@ -696,7 +696,7 @@ export type SessionLogOutput =
                 readonly workspaceID?: (string & Brand.Brand<"Workspace.ID">) | undefined
               }
             | undefined
-          readonly data: { readonly sessionID: Session.ID }
+          readonly data: { readonly sessionID: Session.ID; readonly executionID?: Event.ID | undefined }
         }
       | {
           readonly id: Event.ID
@@ -712,6 +712,7 @@ export type SessionLogOutput =
             | undefined
           readonly data: {
             readonly sessionID: Session.ID
+            readonly executionID?: Event.ID | undefined
             readonly error: {
               readonly type: string
               readonly message: string
@@ -734,6 +735,7 @@ export type SessionLogOutput =
             | undefined
           readonly data: {
             readonly sessionID: Session.ID
+            readonly executionID?: Event.ID | undefined
             readonly reason: "user" | "shutdown" | "superseded" | "inactivity"
           }
         }
@@ -849,6 +851,8 @@ export type SessionLogOutput =
             readonly model: Model.Ref
             readonly snapshot?: (string & Brand.Brand<"Snapshot.ID">) | undefined
             readonly started: number
+            readonly inputMessageIDs?: ReadonlyArray<string> | undefined
+            readonly executionID?: Event.ID | undefined
           }
         }
       | {
@@ -1790,6 +1794,10 @@ export interface CredentialApi<E = never> {
   readonly remove: CredentialRemoveOperation<E>
 }
 
+export type ProjectCreateInput = { readonly parent: AbsolutePath; readonly name: Project.FolderName }
+export type ProjectCreateOutput = Location.PublicRef
+export type ProjectCreateOperation<E = never> = (input: ProjectCreateInput) => Effect.Effect<ProjectCreateOutput, E>
+
 export type ProjectListOutput = ReadonlyArray<Project.Info>
 export type ProjectListOperation<E = never> = () => Effect.Effect<ProjectListOutput, E>
 
@@ -1804,6 +1812,7 @@ export type ProjectUpdateOutput = Project.Info
 export type ProjectUpdateOperation<E = never> = (input: ProjectUpdateInput) => Effect.Effect<ProjectUpdateOutput, E>
 
 export interface ProjectApi<E = never> {
+  readonly create: ProjectCreateOperation<E>
   readonly list: ProjectListOperation<E>
   readonly update: ProjectUpdateOperation<E>
 }

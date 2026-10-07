@@ -18,6 +18,7 @@ async function openHome(page: Page, input: Parameters<typeof mockStressTimeline>
 }
 
 test("the session context menu renames, exports, and deletes a Home session", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
   await openHome(page)
   const target = row(page, fixture.expected.targetTitle)
   await expect(target).toBeVisible()
@@ -32,9 +33,14 @@ test("the session context menu renames, exports, and deletes a Home session", as
   const box = await target.boundingBox()
   await target.click({ button: "right", position: { x: 48, y: 12 } })
   await expect(page).toHaveURL("/")
-  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Export…", "Delete…"])
+  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Copy Session ID", "Export…", "Delete…"])
   const menu = await page.locator('[data-component="menu-v2-content"]').boundingBox()
   expect(Math.abs((menu?.x ?? 0) - (box?.x ?? 0) - 48)).toBeLessThan(4)
+
+  await page.getByRole("menuitem", { name: "Copy Session ID", exact: true }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(fixture.targetID)
+  await expect(page).toHaveURL("/")
+  await target.click({ button: "right", position: { x: 48, y: 12 } })
 
   await page.getByRole("menuitem", { name: "Rename" }).click()
   const title = page.locator('[data-component="home-session-rename"]')

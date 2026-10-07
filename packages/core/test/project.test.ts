@@ -1,8 +1,8 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Stream } from "effect"
+import { Effect, Option, Schema, Stream } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Bus } from "@opencode/core/bus"
@@ -140,6 +140,46 @@ describe("Project.activate", () => {
       yield* db.update(ProjectTable).set({ time_active: 2, time_updated: 1 }).run()
       yield* project.activate(id)
       expect((yield* project.list())[0]?.time).toEqual({ created: 1, updated: 1, active: 2 })
+    }),
+  )
+})
+
+describe("Project.create", () => {
+  test("accepts one portable folder name and rejects paths and reserved names", () => {
+    const decode = Schema.decodeUnknownOption(Project.CreateInput)
+    const parent = abs(path.resolve("."))
+    for (const name of ["Notes", "two words", "Проект", "a.b", ".notes", "CONSOLE", "com10"]) {
+      expect(Option.isSome(decode({ parent, name }))).toBe(true)
+    }
+    for (const name of ["", ".", "..", "../escape", "a/b", "a\\b", "C:drive", "name.", "name ", "CON", "nul.txt", "COM1", "LPT9.txt", "a\u0000b", "a?b"]) {
+      expect(Option.isNone(decode({ parent, name }))).toBe(true)
+    }
+  })
+
+  it.live("creates and registers one child, refuses existing paths, and never creates parents", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const project = yield* Project.Service
+      const decode = Schema.decodeUnknownSync(Project.CreateInput)
+      const directory = abs(path.join(tmp.path, "Notes"))
+      expect(yield* project.create(decode({ parent: tmp.path, name: "Notes" }))).toEqual({ directory })
+      expect(yield* Effect.promise(() => fs.readdir(tmp.path))).toEqual(["Notes"])
+      expect((yield* project.list()).some((item) => item.canonical === directory)).toBe(true)
+      yield* Effect.promise(() => Bun.write(path.join(directory, "keep.txt"), "preserved"))
+
+      const existing = yield* Effect.flip(project.create(decode({ parent: tmp.path, name: "Notes" })))
+      expect(existing).toBeInstanceOf(Project.CreateError)
+      expect(yield* Effect.promise(() => Bun.file(path.join(directory, "keep.txt")).text())).toBe("preserved")
+
+      yield* Effect.promise(() => Bun.write(path.join(tmp.path, "file"), "preserved file"))
+      expect(yield* Effect.flip(project.create(decode({ parent: tmp.path, name: "file" })))).toBeInstanceOf(Project.CreateError)
+      expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, "file")).text())).toBe("preserved file")
+
+      expect(yield* Effect.flip(project.create(decode({ parent: path.join(tmp.path, "missing"), name: "child" })))).toBeInstanceOf(Project.CreateError)
+      expect((yield* Effect.promise(() => fs.readdir(tmp.path))).toSorted()).toEqual(["Notes", "file"])
     }),
   )
 })

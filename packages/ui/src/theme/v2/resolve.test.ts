@@ -5,6 +5,8 @@ import { resolveThemeV2, resolveThemeVariantV2, themeV2ToCss } from "./resolve"
 
 const theme: DesktopTheme = await Bun.file(new URL("../themes/oc-2.json", import.meta.url)).json()
 
+const graphite: DesktopTheme = await Bun.file(new URL("../themes/graphite-soft.json", import.meta.url)).json()
+
 describe("icon emphasis", () => {
   test.each(["light", "dark"] as const)("OC-2 %s icons increase in contrast from faint to base", (mode) => {
     expectIconEmphasis(resolveThemeV2(theme)[mode])
@@ -55,6 +57,35 @@ describe("contrast icon-button tokens", () => {
     expect(tokens["v2-background-bg-contrast"]).toBe("var(--v2-grey-700)")
   })
 })
+
+describe("user message tokens", () => {
+  test.each([false, true])("custom themes receive complete message fallbacks (dark: %s)", (dark) => {
+    const tokens = resolveThemeVariantV2({ ...theme[dark ? "dark" : "light"], v2Overrides: undefined }, dark)
+    expect(tokens).toMatchObject({
+      "v2-background-bg-user-message": "var(--v2-background-bg-layer-02)",
+      "v2-text-text-user-message": "var(--v2-text-text-base)",
+      "v2-text-text-user-message-mention-prefix": "var(--v2-blue-500)",
+      "v2-border-border-user-message": "var(--v2-border-border-base)",
+    })
+  })
+
+  test.each(["light", "dark"] as const)("GraphiteSoft %s message colors retain readable contrast", (mode) => {
+    const tokens = resolveThemeV2(graphite)[mode]
+    const background = requireHex(tokens["v2-background-bg-user-message"])
+
+    expect(contrastRatio(requireHex(tokens["v2-text-text-user-message"]), background)).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrastRatio(requireHex(tokens["v2-text-text-user-message-mention-prefix"]), background),
+    ).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+function requireHex(value: string) {
+  if (!value.startsWith("#")) throw new Error(`Expected a resolved hex color, received ${value}`)
+
+  // SAFETY: HexColor's only structural invariant is the checked leading hash.
+  return value as HexColor
+}
 
 function expectIconEmphasis(tokens: ResolvedV2Theme) {
   const resolve = (value: string): HexColor =>

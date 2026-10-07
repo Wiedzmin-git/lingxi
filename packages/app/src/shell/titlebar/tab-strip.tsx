@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createResource, For, onCleanup, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable, useSortable } from "@dnd-kit/solid/sortable"
@@ -16,7 +16,7 @@ import { useTabs } from "@/shell/tabs/tabs"
 import { createTabComposerState } from "@/composer/persistence"
 import { base64Encode } from "@opencode/util/encode"
 import { showToast } from "@/shell/notifications/toast"
-import { adjacentTabKey, mergeVisibleTabOrder } from "./tab-order"
+import { adjacentTabKey, mergeVisibleTabOrder, SESSION_TAB_DRAG_MIME } from "./tab-order"
 import type { SessionInfo } from "@opencode/client/promise"
 
 function SessionTabSlot(props: {
@@ -31,8 +31,11 @@ function SessionTabSlot(props: {
   onRename: (title: string) => Promise<void>
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
+  move?: Parameters<typeof TabNavItem>[0]["move"]
+  drag?: JSX.HTMLAttributes<HTMLDivElement>
+  onTitleDragStart?: (event: DragEvent) => void
 }) {
-  const sortable = useSortable({
+  const sortable = props.drag ? undefined : useSortable({
     get id() {
       return props.id
     },
@@ -45,7 +48,8 @@ function SessionTabSlot(props: {
 
   return (
     <div
-      ref={sortable.ref}
+      {...props.drag}
+      ref={sortable?.ref}
       data-titlebar-tab-slot
       data-tab-key={props.id}
       data-active={props.active}
@@ -69,14 +73,16 @@ function SessionTabSlot(props: {
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
         active={props.active}
-        dragging={sortable.isDragSource()}
+        dragging={sortable?.isDragSource()}
+        move={props.move}
         orientation={props.orientation}
+        onTitleDragStart={props.onTitleDragStart}
       />
     </div>
   )
 }
 
-function SessionTabEntry(props: {
+export function SessionTabEntry(props: {
   tab: SessionTab
   id: string
   index: number
@@ -86,6 +92,9 @@ function SessionTabEntry(props: {
   onVisibleChange: (visible: boolean) => void
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
+  move?: Parameters<typeof TabNavItem>[0]["move"]
+  drag?: JSX.HTMLAttributes<HTMLDivElement>
+  onTitleDragStart?: (event: DragEvent) => void
 }) {
   const tabs = useTabs()
   const language = useLanguage()
@@ -190,12 +199,15 @@ function SessionTabEntry(props: {
         onRename={rename}
         onNavigate={props.onNavigate}
         onClose={props.onClose}
+        move={props.move}
+        drag={props.drag}
+        onTitleDragStart={props.onTitleDragStart}
       />
     </Show>
   )
 }
 
-function DraftTabSlot(props: {
+export function DraftTabSlot(props: {
   tab: Extract<Tab, { type: "draft" }>
   id: string
   index: number
@@ -204,8 +216,9 @@ function DraftTabSlot(props: {
   title: string
   onNavigate: (element: HTMLDivElement) => void
   onClose: () => void
+  drag?: JSX.HTMLAttributes<HTMLDivElement>
 }) {
-  const sortable = useSortable({
+  const sortable = props.drag ? undefined : useSortable({
     get id() {
       return props.id
     },
@@ -218,7 +231,8 @@ function DraftTabSlot(props: {
 
   return (
     <div
-      ref={sortable.ref}
+      {...props.drag}
+      ref={sortable?.ref}
       data-titlebar-tab-slot
       data-tab-key={props.id}
       data-active={props.active}
@@ -238,7 +252,7 @@ function DraftTabSlot(props: {
         onNavigate={() => props.onNavigate(ref)}
         onClose={props.onClose}
         active={props.active}
-        dragging={sortable.isDragSource()}
+        dragging={sortable?.isDragSource()}
         orientation={props.orientation}
       />
     </div>
@@ -313,7 +327,7 @@ export function TitlebarTabStrip(props: {
                   : [new PointerActivationConstraints.Distance({ value: 4 })],
               preventActivation: (event) =>
                 event.target instanceof Element &&
-                !!event.target.closest('[data-slot="tab-close"], [contenteditable="true"]'),
+                !!event.target.closest('[data-slot="tab-close"], [contenteditable="true"], [data-session-reference-drag], [data-titlebar-tab-title][draggable="true"]'),
             }),
           ]}
           modifiers={[
@@ -362,6 +376,22 @@ export function TitlebarTabStrip(props: {
             class="flex w-full min-w-0"
             classList={{ "flex-row items-center": !vertical(), "flex-col items-stretch": vertical() }}
             ref={listRef}
+            onDragOver={(event) => {
+              if (!event.dataTransfer?.types.includes(SESSION_TAB_DRAG_MIME)) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = "move"
+            }}
+            onDrop={(event) => {
+              const source = event.dataTransfer?.getData(SESSION_TAB_DRAG_MIME)
+              if (!source) return
+              event.preventDefault()
+              const target = event.target instanceof Element ? event.target.closest("[data-tab-key]")?.getAttribute("data-tab-key") : undefined
+              const visible = visibleTabIds()
+              const from = visible.indexOf(source)
+              const to = target ? visible.indexOf(target) : -1
+              if (from < 0 || to < 0 || from === to) return
+              props.onReorder(mergeVisibleTabOrder(props.tabs.map(tabKey), visible, arrayMove(visible, from, to)))
+            }}
           >
             <For each={props.tabs}>
               {(tab) => {
@@ -431,7 +461,7 @@ export function TitlebarTabStrip(props: {
   )
 }
 
-function useTabShortcut(index: () => number, onSelect: () => void) {
+export function useTabShortcut(index: () => number, onSelect: () => void) {
   const command = useCommand()
 
   command.register(() => {

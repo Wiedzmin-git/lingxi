@@ -3,8 +3,33 @@ import type { SessionMessageUser } from "@opencode/client/promise"
 import { extractPromptContext, extractPromptFromMessage } from "./prompt"
 import { buildPromptRequest } from "./request"
 import { contextItemKey } from "./schema"
+import { ComposerStore, type Prompt } from "./schema"
+import { Schema } from "effect"
 
 describe("extractPromptFromMessage", () => {
+  // Protects persisted identity and the rebuilt model payload, not just the rendered chip.
+  test("roundtrips same-title branch references through draft, sent metadata and restored model text", () => {
+    const prompt: Prompt = [
+      { type: "text", content: "A ", start: 0, end: 2 },
+      { type: "session", server: "server-a", sessionID: "ses_first", title: "ЦОН", content: "ЦОН", start: 2, end: 5 },
+      { type: "text", content: " B ", start: 5, end: 8 },
+      { type: "session", server: "server-a", sessionID: "ses_second", title: "ЦОН", content: "ЦОН", start: 8, end: 11 },
+      { type: "text", content: " C", start: 11, end: 13 },
+    ]
+    const encoded = Schema.encodeSync(ComposerStore)({ prompt, context: { items: [] } })
+    const saved = Schema.decodeUnknownSync(ComposerStore)(JSON.parse(JSON.stringify(encoded)))
+    expect(saved.prompt).toEqual(prompt)
+    const request = buildPromptRequest({ prompt: saved.prompt, context: [], images: [], text: "A ЦОН B ЦОН C", sessionDirectory: "C:/repo" })
+    const boundary = '. The ID belongs only to the named originating server; never reinterpret it on another server or recreate a missing target.'
+    const expected = 'A ЦОН B ЦОН C\nBranch reference at user-text characters 2..5: {"title":"ЦОН","sessionID":"ses_first","server":"server-a"}' + boundary + '\nBranch reference at user-text characters 8..11: {"title":"ЦОН","sessionID":"ses_second","server":"server-a"}' + boundary
+    expect(request.text).toBe(expected)
+    expect(request.agents).toEqual([])
+    expect(request.files).toEqual([])
+    const restored = extractPromptFromMessage({ id: "msg_refs", text: request.text,
+      metadata: { displayText: request.displayText, comments: [], sessionReferences: request.sessionReferences ?? [] } })
+    expect(restored).toEqual(prompt)
+    expect(buildPromptRequest({ prompt: restored, context: [], images: [], text: "A ЦОН B ЦОН C", sessionDirectory: "C:/renamed" }).text).toBe(expected)
+  })
   test("restores uploaded attachments in order, optimistic data URLs, and review comments", () => {
     const message = {
       id: "msg_1",

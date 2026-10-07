@@ -14,6 +14,7 @@ import { Money } from "@opencode/schema/money"
 import { SessionUsage } from "../usage.js"
 import { contentFilterError } from "../to-session-error.js"
 import type { Tool } from "../../tool.js"
+import type { Event } from "@opencode/schema/event"
 
 type Input = {
   readonly sessionID: SessionSchema.ID
@@ -23,6 +24,8 @@ type Input = {
   readonly snapshot?: Snapshot.ID
   readonly started: number
   readonly assistantMessageID: SessionMessage.ID
+  readonly inputMessageIDs?: readonly string[]
+  readonly executionID?: Event.ID
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -107,6 +110,8 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       assistantMessageID,
       snapshot: input.snapshot,
       started: input.started,
+      inputMessageIDs: input.inputMessageIDs,
+      executionID: input.executionID,
     })
     return assistantMessageID
   })

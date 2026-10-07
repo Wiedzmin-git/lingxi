@@ -4,7 +4,7 @@ import { PromptInput } from "@opencode/schema/prompt-input"
 import { SessionInbox } from "@opencode/schema/session-inbox"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { Schema } from "effect"
-import { provider } from "../utils/app"
+import { provider, SERVER, sessionHref } from "../utils/app"
 import type { MockServerConfig } from "../utils/mock-server"
 import { openSession } from "../utils/workspace"
 
@@ -351,6 +351,55 @@ test("editing restores the existing draft and replaces only the original queue p
   expect(mock.log[0]).toBe("prompt:queue")
 })
 
+test("editing queued branch references retains exact IDs and removes stale model context", async ({ page }) => {
+  const displayText = "A ЦОН B ЦОН C"
+  const mock = createQueueMock([displayText])
+  mock.rows[0].payload.text = displayText + '\nBranch reference at user-text characters 2..5: {"title":"ЦОН","sessionID":"ses_first"}\nBranch reference at user-text characters 8..11: {"title":"ЦОН","sessionID":"ses_second"}'
+  mock.rows[0].payload.metadata = { displayText, comments: [], sessionReferences: [
+    { type: "session", server: SERVER, sessionID: "ses_first", title: "ЦОН", content: "ЦОН", start: 2, end: 5 },
+    { type: "session", server: SERVER, sessionID: "ses_second", title: "ЦОН", content: "ЦОН", start: 8, end: 11 },
+  ] }
+  const view = await openQueue(page, mock)
+  await view.rows.getByText(displayText, { exact: true }).click()
+  const chips = view.input.locator('[data-mention="session"]')
+  await expect(chips).toHaveCount(2)
+  await expect(chips.nth(0)).toHaveAttribute("title", "ses_first")
+  await expect(chips.nth(1)).toHaveAttribute("title", "ses_second")
+  await chips.nth(0).getByRole("button", { name: "Remove attachment" }).click()
+  await expect(chips).toHaveCount(1)
+  await view.input.press("Enter")
+  await expect.poll(() => mock.prompts.length).toBe(1)
+  expect(mock.prompts[0].text).not.toContain("ses_first")
+  expect(mock.prompts[0].text.match(/ses_second/g)).toHaveLength(1)
+  expect(mock.prompts[0].metadata?.sessionReferences).toMatchObject([{ sessionID: "ses_second", title: "ЦОН" }])
+})
+
+test("same-title queued branch replacement and plain text are real edits, not pristine text", async ({ page }) => {
+  const title = "Session queue regression"
+  const mock = createQueueMock([title])
+  mock.rows[0].payload.text = title + `\nBranch reference at user-text characters 0..${title.length}: ${JSON.stringify({ title, sessionID: "ses_first" })}`
+  mock.rows[0].payload.metadata = { displayText: title, comments: [], sessionReferences: [
+    { type: "session", server: SERVER, sessionID: "ses_first", title, content: title, start: 0, end: title.length },
+  ] }
+  const view = await openQueue(page, mock)
+  await view.rows.getByText(title, { exact: true }).click()
+  await view.input.locator('[data-mention="session"]').getByRole("button", { name: "Remove attachment" }).click()
+  await page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(sessionID)}"]) [data-session-reference-drag]`).dragTo(view.input)
+  await expect(view.input.locator('[data-mention="session"]')).toHaveAttribute("title", sessionID)
+  await view.input.press("Enter")
+  await expect.poll(() => mock.prompts.length).toBe(1)
+  expect(mock.prompts[0].metadata?.sessionReferences).toMatchObject([{ sessionID, server: SERVER }])
+  expect(mock.prompts[0].text).not.toContain("ses_first")
+  await view.rows.getByText(title, { exact: true }).click()
+  await view.input.locator('[data-mention="session"]').getByRole("button", { name: "Remove attachment" }).click()
+  await view.input.press("ControlOrMeta+A")
+  await view.input.pressSequentially(title)
+  await view.input.press("Enter")
+  await expect.poll(() => mock.prompts.length).toBe(2)
+  expect(mock.prompts[1].text).toBe(title)
+  expect(mock.prompts[1].metadata?.sessionReferences ?? []).toEqual([])
+})
+
 for (const delivery of ["queue", "steer"] as const) {
   test(`editing a prompt the server delivered meanwhile keeps the edit draft (${delivery})`, async ({ page }) => {
     const mock = createQueueMock(["first queued prompt", "second queued prompt"])
@@ -445,6 +494,9 @@ test("editing a comment-only prompt keeps its notes once", async ({ page }) => {
   // With no display text, the editor shows the note itself, so the edit owns it as text.
   await view.rows.getByText(note, { exact: true }).click()
   await expect(view.input).toHaveText(note)
+  // Restored text precedes queued focus/caret restoration; press() would focus
+  // it early and let that pending restoration split the inserted suffix.
+  await expect(view.input).toBeFocused()
   await view.input.press("End")
   await view.input.pressSequentially(", please")
   await expect(view.input).toHaveText(`${note}, please`)

@@ -237,23 +237,23 @@ export const InboxDeliveryChanged = Event.durable({
 export type InboxDeliveryChanged = typeof InboxDeliveryChanged.Type
 
 export namespace Execution {
-  export const Started = Event.durable({ type: "session.execution.started", ...options, schema: Base })
+  export const Started = Event.durable({ type: "session.execution.started", ...options, schema: { ...Base, executionID: Event.ID.pipe(optional) } })
   export type Started = typeof Started.Type
 
-  export const Succeeded = Event.durable({ type: "session.execution.succeeded", ...options, schema: Base })
+  export const Succeeded = Event.durable({ type: "session.execution.succeeded", ...options, schema: { ...Base, executionID: Event.ID.pipe(optional) } })
   export type Succeeded = typeof Succeeded.Type
 
   export const Failed = Event.durable({
     type: "session.execution.failed",
     ...options,
-    schema: { ...Base, error: SessionError.Error },
+    schema: { ...Base, executionID: Event.ID.pipe(optional), error: SessionError.Error },
   })
   export type Failed = typeof Failed.Type
 
   export const Interrupted = Event.durable({
     type: "session.execution.interrupted",
     ...options,
-    schema: { ...Base, reason: Schema.Literals(["user", "shutdown", "superseded", "inactivity"]) },
+    schema: { ...Base, executionID: Event.ID.pipe(optional), reason: Schema.Literals(["user", "shutdown", "superseded", "inactivity"]) },
   })
   export type Interrupted = typeof Interrupted.Type
 }
@@ -337,6 +337,9 @@ export namespace Step {
       snapshot: Snapshot.ID.pipe(optional),
       /** Request dispatch time, before waiting for provider output. */
       started: NonNegativeInt,
+      /** Exact message IDs retained in this attempt's canonical primary request. Not proof of comprehension. */
+      inputMessageIDs: Schema.Array(Schema.String).pipe(optional),
+      executionID: Event.ID.pipe(optional),
     },
   })
   export type Started = typeof Started.Type

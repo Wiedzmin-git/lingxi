@@ -5,6 +5,7 @@ import type { DesktopMenuAction } from "@/shell/commands/desktop-menu"
 import { ServerConnection } from "@/runtime/server/registry"
 import type { DraftStore } from "@/runtime/persistence/drafts"
 import type { Bridge } from "@opencode/gui-extensions/sdk/bridge"
+import type { SessionLinkRequest, SessionLinkResult } from "./session-link"
 
 type PickerPaths = string | string[] | null
 
@@ -122,6 +123,8 @@ type PlatformBase = {
 
   /** GUI extension bridge to the main-process extension host (desktop only). */
   extensions?: Bridge
+  /** Owner-only local Desktop mailbox controls. Never a remote branch API. */
+  sessionLink?(request: SessionLinkRequest): Promise<SessionLinkResult>
 }
 
 export type Platform = PlatformBase &

@@ -59,7 +59,7 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
 
     const prompt = clonePrompt(input.adapter.state.current())
     const text = submissionText(prompt)
-    const clientCommand = input.mode() === "normal" ? input.clientCommand?.(text) : undefined
+    const clientCommand = input.mode() === "normal" && !prompt.some((part) => part.type === "session") ? input.clientCommand?.(text) : undefined
 
     if (clientCommand) {
       if (submitting.has(input.adapter.state)) return
@@ -120,7 +120,9 @@ export function createComposerSubmit(input: ComposerSubmitInput) {
     submitting.add(input.adapter.state)
     const comments = input.comments.capture()
     // Capture command intent before starting a session in a worktree whose catalog has not loaded.
-    const command = value.mode === "normal" ? findCommand(input.commands(), value.text) : undefined
+    const command = value.mode === "normal" && !value.prompt.some((part) => part.type === "session")
+      ? findCommand(input.commands(), value.text)
+      : undefined
 
     try {
       const started =
@@ -229,6 +231,9 @@ function handoffMessage(value: ComposerSubmission): SessionMessageUser {
     })),
     metadata: {
       displayText: value.text,
+      ...(value.prompt.some((part) => part.type === "session")
+        ? { sessionReferences: value.prompt.filter((part) => part.type === "session") }
+        : {}),
       attachments: value.prompt.flatMap((part) =>
         part.type === "path" ? [{ name: part.filename, mime: part.mime, path: part.path }] : [],
       ),
@@ -343,6 +348,7 @@ function restoreSubmission(
               subject: item.subject,
               href: item.href,
               live: item.live,
+              quote: item.quote,
               comment: item.comment,
               commentID: item.commentID,
             }
@@ -493,6 +499,7 @@ async function sendPrompt(
       displayText: request.displayText,
       comments: request.comments,
       attachments: request.attachments,
+      ...(request.sessionReferences ? { sessionReferences: request.sessionReferences } : {}),
       agent: value.selection.agent,
       model: selectionModel(value.selection),
     },

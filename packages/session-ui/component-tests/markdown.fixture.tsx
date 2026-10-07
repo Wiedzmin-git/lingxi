@@ -13,8 +13,11 @@ export {
   sanitizeMarkdown,
   touchCachedMarkdown,
 } from "../src/components/markdown-cache"
+
 export { renderMermaidSvg } from "../src/components/markdown-mermaid"
+
 export { MarkdownWorkerDisposedError } from "../src/components/markdown-worker"
+
 export { preloadMarkdown }
 
 export async function mountMarkdown(options: {
@@ -22,6 +25,7 @@ export async function mountMarkdown(options: {
   streaming?: boolean
   cached?: boolean
   images?: boolean
+  localFiles?: boolean
 }) {
   if (options.cached) await preloadMarkdown(options.text, "markdown-test")
   const host = document.createElement("div")
@@ -32,9 +36,13 @@ export async function mountMarkdown(options: {
       baseUrl: location.origin,
       headers: { Authorization: `Basic ${btoa("opencode:fixture")}` },
     })
+
     const [text, setText] = createSignal(options.text)
     const [streaming, setStreaming] = createSignal(options.streaming ?? false)
     const [visible, setVisible] = createSignal(true)
+    const [opened, setOpened] = createSignal("")
+    const [revealed, setRevealed] = createSignal("")
+
     return (
       <DialogProvider>
         <textarea aria-label="Markdown text" value={text()} onInput={(event) => setText(event.currentTarget.value)} />
@@ -45,7 +53,11 @@ export async function mountMarkdown(options: {
           onChange={(event) => setStreaming(event.currentTarget.checked)}
         />
         <button onClick={() => setVisible((value) => !value)}>Toggle Markdown</button>
+        <output aria-label="Opened file">{opened()}</output>
+        <output aria-label="Revealed file">{revealed()}</output>
         <MarkdownProvider
+          openLocalFile={options.localFiles ? setOpened : undefined}
+          localFileReveal={options.localFiles ? (path) => ({ label: "Show in File Explorer", run: () => setRevealed(path) }) : undefined}
           readImage={(path, signal) =>
             options.images ? readLocalImage(api, "C:/project", path, signal) : Promise.resolve(undefined)
           }

@@ -18,6 +18,7 @@ import { showToast } from "@/shell/notifications/toast"
 import { useLocal } from "@/providers/models/selection"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useWorkspaceLocation } from "@/workspaces/location"
+import { MessageQuoteDetails } from "@/composer/message-quote-editor"
 import { requireServerKey, sessionHref } from "@/shell/routes/session"
 import { useComposerCommands } from "@/composer/commands"
 import { useSessionCommands } from "../commands/use-session-commands"
@@ -215,10 +216,6 @@ export function createActiveSessionRegion(input: {
   useSessionCommands({
     session: input.session,
     region: input.region,
-    background: {
-      blocking: () => state.background.blocking().length > 0,
-      move: state.background.move,
-    },
     navigateMessageByOffset: input.timeline.actions.navigateMessage,
     revert,
     focusInput: focus,
@@ -261,6 +258,7 @@ export function createActiveSessionRegion(input: {
     active,
     drop: {
       active: () => active()?.drop.active() ?? false,
+      reference: () => active()?.drop.reference() ?? false,
       input: () => active()?.drop.input(),
     },
     actions: {
@@ -276,6 +274,31 @@ export function createActiveSessionRegion(input: {
           return pendingSteer
         },
         openAttachment,
+        openQuote: (quote, comment) =>
+          dialog.show(() => (
+            <MessageQuoteDetails
+              quote={quote}
+              comment={comment}
+              onSource={() => {
+                const revealID = quote.userMessageID
+
+                input.timeline.view.unpin()
+
+                if (
+                  quote.sessionID !== input.session.identity.sessionID() ||
+                  !input.session.history.visibleUserMessages().some((message) => message.id === revealID)
+                ) {
+                  navigate(
+                    `${sessionHref(requireServerKey(input.session.identity.params.serverKey), quote.sessionID)}#message-${revealID}`,
+                  )
+
+                  return
+                }
+
+                input.timeline.actions.revealMessage(revealID, quote.partID)
+              }}
+            />
+          )),
       } satisfies SessionUserActions,
     },
     requests: state,

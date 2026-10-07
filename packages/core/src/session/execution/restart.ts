@@ -1,6 +1,6 @@
 export * as SessionRestart from "./restart.js"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Deferred, Effect, Layer } from "effect"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Bus } from "../../bus.js"
 import { Job } from "../../job.js"
@@ -11,6 +11,7 @@ import { SessionSchema } from "../schema.js"
 import { SessionStore } from "../store.js"
 import { ShellResult } from "../../shell/result.js"
 import { SubagentCompletion } from "../subagent-completion.js"
+import { SubagentJob } from "../subagent-job.js"
 
 const CONTINUE_AFTER_SERVER_RESTART =
   "The server restarted while you were working. Continue from where you left off without repeating completed work."
@@ -139,6 +140,7 @@ export const layer = (options?: Options) =>
         background: Job.Background,
         recovery: Extract<Job.Recovery, { kind: "subagent" }>,
         suspended: ReadonlySet<SessionSchema.ID>,
+        restored: Deferred.Deferred<void, unknown>,
       ) {
         const child = yield* store.get(recovery.childSessionID)
         if (!child || child.parentID !== recovery.parentSessionID || !(yield* store.get(recovery.parentSessionID))) {
@@ -146,12 +148,16 @@ export const layer = (options?: Options) =>
           return
         }
 
-        const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error">) {
+        const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error" | "awaitResult"> & {
+          metadata?: Job.Info["metadata"]
+        }) {
           yield* SubagentCompletion.deliver(sessions, jobs, {
             ...result,
             recovery,
             notificationID: background.notificationID,
-            resume: suspended.has(recovery.parentSessionID) ? false : undefined,
+            resume: suspended.has(recovery.parentSessionID) ||
+              (result.status === "cancelled" && (result.metadata?.awaitResult ?? result.awaitResult))
+              ? false : undefined,
           }).pipe(Effect.orDie)
         })
 
@@ -170,17 +176,10 @@ export const layer = (options?: Options) =>
           type: "subagent",
           title: recovery.description,
           notificationID: background.notificationID,
+          metadata: { awaitResult: background.awaitResult === true },
           recovery,
-          run: execution.resume(recovery.childSessionID).pipe(
-            Effect.andThen(store.context(recovery.childSessionID)),
-            Effect.map((messages) => {
-              const assistant = messages.findLast(
-                (message) =>
-                  message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
-              )
-              return SubagentCompletion.text(assistant)
-            }),
-          ),
+          run: Deferred.await(restored).pipe(Effect.andThen(SubagentJob.run(sessions, jobs, recovery))),
+          onCancel: SubagentJob.cancel(sessions, jobs, recovery),
         })
         yield* jobs.background(background.id)
         yield* jobs.wait({ id: background.id }).pipe(
@@ -192,6 +191,7 @@ export const layer = (options?: Options) =>
       return Service.of({
         resumeSuspendedSessions: Effect.gen(function* () {
           const active = yield* execution.active
+          const restored = yield* Deferred.make<void, unknown>()
           const pending = yield* jobs.pendingBackground
           const children = pending.flatMap((background) =>
             background.status === "running" && background.recovery.kind === "subagent"
@@ -211,9 +211,13 @@ export const layer = (options?: Options) =>
               const recovery = background.recovery
               yield* recovery.kind === "shell"
                 ? recoverShell(background, recovery)
-                : recoverSubagent(background, recovery, suspended)
+                : recoverSubagent(background, recovery, suspended, restored)
             }),
             { discard: true },
+          ).pipe(
+            // Every terminal outcome releases staged Jobs: success permits
+            // execution; failure preserves its cause instead of stranding them.
+            Effect.onExit((exit) => Deferred.done(restored, exit)),
           )
 
           // Background completion can wake a parent, so inspect local ownership only after recovery.

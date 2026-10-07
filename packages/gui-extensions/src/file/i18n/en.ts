@@ -20,6 +20,7 @@ export default {
   "open.ariaLabel": "Open in {{app}}",
   "open.menu": "Open options",
   "open.copyPath": "Copy path",
+  "reveal.failed": "Could not show this file in the file manager. It may have been moved or deleted.",
   "open.app.vscode": "VS Code",
   "open.app.cursor": "Cursor",
   "open.app.zed": "Zed",

@@ -436,6 +436,7 @@ export function fromPromise(plugin: Plugin) {
             reload: () => run(host.mcp.reload()),
           },
           permission: {
+            authorizeRead: (input, options) => Effect.runPromiseWith(runtime)(host.permission.authorizeRead(input), { signal: options?.signal }),
             hook: (name, callback) =>
               register(host.permission.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))))),
             list: adaptApiMethod(PermissionEndpoints["session.permission.list"], host.permission.list),

@@ -8,8 +8,33 @@ import { Transferable } from "effect/unstable/workers"
 import { omitUndefined } from "../shared/ipc-transport"
 import { FilesOpenFilePicker } from "../shared/ipc-rpc/files"
 import { IpcPortHandoff, IpcServerProtocolLive } from "./ipc-transport"
+import { SessionLinkRpcs } from "../shared/ipc-rpc/session-link"
 
 describe("desktop RPC transport", () => {
+  test("mailbox owner ingress decodes raw requests and rejects arbitrary remote-control operations", async () => {
+    const received: unknown[] = []
+    const hostnameConfig = { enabled: true, host: "127.0.0.1", publishHost: "localhost", port: 58321, outgoingNetworks: ["127.0.0.0/8"], outgoingPorts: [58321], retryHours: 24 }
+    const handlers = SessionLinkRpcs.toLayer({ SessionLinkManage: ({ request }) => Effect.sync(() => { received.push(request); return { ok: true, ...(request.config ? { config: request.config } : {}) } }) })
+    const runtime = ManagedRuntime.make(RpcServer.layer(SessionLinkRpcs).pipe(Layer.provide(handlers), Layer.provideMerge(IpcServerProtocolLive)))
+    const handoff = await runtime.runPromise(IpcPortHandoff)
+    const channel = new MessageChannel()
+    handoff.bind(sender(913), serverPort(channel.port1))
+    for (const [index, request] of [
+      { operation: "status", server: "sidecar" },
+      { operation: "configure", server: "sidecar", config: hostnameConfig },
+      { operation: "remote-list", server: "sidecar" },
+      { operation: "stop", server: "sidecar", sessionID: "ses_foreign" },
+      { operation: "configure", server: "sidecar", config: { enabled: "yes", host: "127.0.0.1", port: 58321, outgoingNetworks: [], outgoingPorts: [], retryHours: 24 } },
+    ].entries()) {
+      const result = await call(channel.port2, index + 1, "SessionLinkManage", { request })
+      if (index === 0) expect(result.exit).toEqual(success({ ok: true }))
+      else if (index === 1) expect(result.exit).toEqual(success({ ok: true, config: hostnameConfig }))
+      else expect(result.exit._tag).toBe("Failure")
+    }
+    expect(received).toEqual([{ operation: "status", server: "sidecar" }, { operation: "configure", server: "sidecar", config: hostnameConfig }])
+    channel.port2.close()
+    await runtime.dispose()
+  })
   test("decodes renderer payloads whose optional fields are undefined", async () => {
     let received: unknown
     const rpcs = RpcGroup.make(FilesOpenFilePicker)

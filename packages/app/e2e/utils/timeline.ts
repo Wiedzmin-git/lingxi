@@ -546,6 +546,10 @@ export function stepStarted(message: SessionMessageAssistant) {
   })
 }
 
+export function stepStreamed(messageID = assistantID) {
+  return makeEvent("session.step.streamed", { sessionID, assistantMessageID: messageID })
+}
+
 export function userMessage(
   parts?: PartSeed<"user">[],
   input: { id?: string; summary?: unknown; created?: number } = {},

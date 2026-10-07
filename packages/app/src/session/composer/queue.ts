@@ -8,7 +8,7 @@ import type { ComposerDelivery } from "@/composer/adapter"
 import type { ComposerStateTarget } from "@/composer/submission-state"
 import type { ContextItem, ImageAttachmentPart, PathAttachmentPart, Prompt } from "@/composer/state"
 import { appendPrompt, clonePrompt, isAttachment, promptLength } from "@/composer/prompt-parts"
-import { buildPromptRequest } from "@/composer/request"
+import { buildPromptRequest, formatSessionReference } from "@/composer/request"
 import { blobDataUrl, createLegacyBlobReference } from "@/runtime/persistence/drafts"
 import { readPromptPresentation } from "@/composer/comment-note"
 import { extractPromptContext, extractPromptFromMessage } from "@/composer/prompt"
@@ -269,9 +269,14 @@ export function createSessionQueue(input: {
       },
     })
     const text = queuedPromptText(item)
+    const parts: Prompt = readPromptPresentation(item.payload.metadata)?.sessionReferences.length
+      ? extractPromptFromMessage({ id: item.id, ...item.payload }, { directory: location().directory })
+          .filter((part) => !isAttachment(part))
+          .map((part) => part.type === "session" || part.type === "text" ? part : { type: "text", content: part.content, start: part.start, end: part.end })
+      : [{ type: "text", content: text, start: 0, end: text.length }]
     input.draft.mode.set("normal")
     input.draft.set(
-      [{ type: "text", content: text, start: 0, end: text.length }, ...queuedPromptAttachments(item)],
+      [...parts, ...queuedPromptAttachments(item)],
       text.length,
     )
     input.restoreFocus(text.length)
@@ -304,10 +309,18 @@ export function createSessionQueue(input: {
     if (!text.trim() && !attachments.length) return cancelEdit()
     const item = queued().find((entry) => entry.id === editing.id)
     const original = item ? queuedPromptAttachments(item) : []
+    const references = prompt.filter((part) => part.type === "session")
+    const originalReferences = item ? readPromptPresentation(item.payload.metadata)?.sessionReferences ?? [] : []
 
     const pristine =
       item &&
       text.trim() === queuedPromptText(item) &&
+      references.length === originalReferences.length &&
+      references.every((part, index) => {
+        const previous = originalReferences[index]
+        return part.sessionID === previous.sessionID && part.server === previous.server && part.title === previous.title &&
+          part.content === previous.content && part.start === previous.start && part.end === previous.end
+      }) &&
       attachments.length === original.length &&
       attachments.every((attachment, index) => attachment.id === original[index].id)
 
@@ -455,7 +468,16 @@ async function editedPromptInput(
   const request = buildPromptRequest({ prompt, context: [], images, text, sessionDirectory: directory })
   const payload = item?.payload
   const display = item ? queuedPromptText(item) : ""
-  const notes = payload && display && payload.text.startsWith(display) ? payload.text.slice(display.length) : ""
+  const suffix = payload && display && payload.text.startsWith(display) ? payload.text.slice(display.length) : ""
+  const originalReferences = payload ? readPromptPresentation(payload.metadata)?.sessionReferences ?? [] : []
+  const originalReferenceText = originalReferences.length ? [
+    `\n${originalReferences.map(formatSessionReference).join("\n")}`,
+    // Older saved drafts carried the same exact-ID suffix without server copy.
+    `\n${originalReferences.map((part) => `Branch reference at user-text characters ${part.start}..${part.end}: ${JSON.stringify({ title: part.title, sessionID: part.sessionID })}`).join("\n")}`,
+  ].find((value) => suffix.startsWith(value)) : undefined
+  // The edit rebuilds branch identity from its current typed chips. Preserve
+  // unrelated comment notes, but never carry removed/replaced reference IDs.
+  const notes = originalReferenceText ? suffix.slice(originalReferenceText.length) : suffix
 
   const mention = (value: { start: number; end: number; text: string } | undefined) => {
     if (!value) return undefined
@@ -521,6 +543,7 @@ async function editedPromptInput(
       comments: notes ? (payload?.metadata?.["comments"] ?? []) : [],
       displayText: request.displayText,
       attachments: request.attachments,
+      sessionReferences: request.sessionReferences ?? [],
     },
   }
 }

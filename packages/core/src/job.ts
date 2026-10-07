@@ -27,6 +27,7 @@ const Background = Schema.Struct({
   status: Schema.Literals(["running", "completed", "error", "cancelled"]),
   output: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
+  awaitResult: Schema.optionalKey(Schema.Boolean),
 })
 
 export type Background = typeof Background.Type
@@ -59,6 +60,7 @@ type Active = {
   isBackgrounded: boolean
   consumed: boolean
   recovery?: Recovery
+  onCancel?: Effect.Effect<void>
 }
 
 type State = {
@@ -71,6 +73,7 @@ type FinishResult = {
   done?: Deferred.Deferred<Info>
   scope?: Scope.Closeable
   generation?: Scope.Closeable
+  onCancel?: Effect.Effect<void>
 }
 
 type BackgroundResult = {
@@ -100,6 +103,8 @@ export type StartInput = {
   recovery?: Recovery
   notificationID?: SessionMessage.ID
   run: Effect.Effect<string, unknown>
+  /** Explicit cancellation only; global scope teardown preserves restart semantics. */
+  onCancel?: Effect.Effect<void>
 }
 
 export type WaitInput = {
@@ -134,6 +139,10 @@ export interface Interface {
   readonly cancel: (id: string) => Effect.Effect<Info | undefined>
   readonly pendingBackground: Effect.Effect<readonly Background[]>
   readonly completeBackground: (notificationID: SessionMessage.ID) => Effect.Effect<void>
+  /** Waits for the current owner's background notifications to be admitted, not merely for process exit. */
+  readonly awaitBackground: (sessionID: SessionSchema.ID) => Effect.Effect<boolean>
+  /** Cancels default-background work owned by this Session; explicit detached work is unchanged. */
+  readonly cancelBackground: (sessionID: SessionSchema.ID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Job") {}
@@ -177,6 +186,7 @@ function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: Sessi
  */
 export const make = Effect.gen(function* () {
   const kv = yield* KV.Service
+  const admissions = new Map<SessionMessage.ID, Deferred.Deferred<void>>()
   const state: State = {
     jobs: yield* SynchronizedRef.make(new Map()),
     scope: yield* Scope.Scope,
@@ -202,6 +212,7 @@ export const make = Effect.gen(function* () {
       notificationID: job.info.notificationID,
       recovery: job.recovery,
       status: job.info.status,
+      ...(job.info.metadata?.awaitResult === true ? { awaitResult: true } : {}),
       ...(job.info.output !== undefined ? { output: job.info.output } : {}),
       ...(job.info.error !== undefined ? { error: job.info.error } : {}),
     })
@@ -260,7 +271,13 @@ export const make = Effect.gen(function* () {
           Effect.fnUntraced(function* (jobs): Effect.fn.Return<readonly [StartResult, Map<string, Active>]> {
             const existing = jobs.get(input.id)
             if (existing?.info.status === "running") {
-              return [{ info: snapshot(existing) }, jobs]
+              // A default-mode continuation adopts detached work, but a later
+              // explicit detached call cannot revoke an outstanding requirement.
+              const job = input.metadata?.awaitResult === true
+                ? { ...existing, info: { ...existing.info, metadata: { ...existing.info.metadata, awaitResult: true } } }
+                : existing
+              if (job.isBackgrounded && job !== existing) yield* persistBackground(job)
+              return [{ info: snapshot(job) }, new Map(jobs).set(input.id, job)]
             }
             const scope = yield* Scope.fork(state.scope, "parallel")
             const job = {
@@ -280,6 +297,7 @@ export const make = Effect.gen(function* () {
               isBackgrounded: false,
               consumed: false,
               recovery: input.recovery,
+              onCancel: input.onCancel,
             }
             return [{ info: snapshot(job), scope }, new Map(jobs).set(input.id, job)]
           }),
@@ -365,6 +383,8 @@ export const make = Effect.gen(function* () {
       },
     }
     yield* persistBackground(next)
+    if (next.info.notificationID && !admissions.has(next.info.notificationID))
+      admissions.set(next.info.notificationID, Deferred.makeUnsafe<void>())
     return next
   })
 
@@ -427,11 +447,12 @@ export const make = Effect.gen(function* () {
         }
         yield* persistBackground(next)
         return [
-          { info: snapshot(next), done: job.done, scope: job.scope, generation: job.scope },
+          { info: snapshot(next), done: job.done, scope: job.scope, generation: job.scope, onCancel: job.onCancel },
           new Map(jobs).set(id, next),
         ]
       }),
     )
+    if (result.onCancel) yield* result.onCancel
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info)
     if (result.scope) yield* Scope.close(result.scope, Exit.void)
     if (result.generation) yield* consume(id, result.generation)
@@ -453,6 +474,9 @@ export const make = Effect.gen(function* () {
     SynchronizedRef.updateEffect(state.jobs, (jobs) =>
       Effect.gen(function* () {
         yield* kv.remove(`${backgroundPrefix}${notificationID}`)
+        const admission = admissions.get(notificationID)
+        if (admission) yield* Deferred.succeed(admission, undefined)
+        admissions.delete(notificationID)
         const entry = [...jobs].find(([, job]) => job.info.notificationID === notificationID)
         if (!entry || entry[1].info.status === "running") return jobs
         const next = new Map(jobs)
@@ -461,6 +485,26 @@ export const make = Effect.gen(function* () {
       }),
     ),
   )
+
+  const awaitBackground: Interface["awaitBackground"] = Effect.fn("Job.awaitBackground")(function* (sessionID) {
+    const pending = [...(yield* SynchronizedRef.get(state.jobs)).values()].filter((job) =>
+      job.isBackgrounded && job.info.metadata?.awaitResult === true && job.recovery &&
+      (job.recovery.kind === "shell" ? job.recovery.sessionID : job.recovery.parentSessionID) === sessionID,
+    )
+    yield* Effect.forEach(pending, (job) => {
+      const admission = job.info.notificationID ? admissions.get(job.info.notificationID) : undefined
+      return admission ? Deferred.await(admission) : Effect.void
+    }, { concurrency: "unbounded", discard: true })
+    return pending.length > 0
+  })
+
+  const cancelBackground: Interface["cancelBackground"] = Effect.fn("Job.cancelBackground")(function* (sessionID) {
+    const pending = [...(yield* SynchronizedRef.get(state.jobs)).values()].filter((job) =>
+      job.info.status === "running" && job.info.metadata?.awaitResult === true && job.recovery &&
+      (job.recovery.kind === "shell" ? job.recovery.sessionID : job.recovery.parentSessionID) === sessionID,
+    )
+    yield* Effect.forEach(pending, (job) => cancel(job.info.id), { concurrency: "unbounded", discard: true })
+  })
 
   return Service.of({
     get,
@@ -472,6 +516,8 @@ export const make = Effect.gen(function* () {
     cancel,
     pendingBackground,
     completeBackground,
+    awaitBackground,
+    cancelBackground,
   })
 })
 

@@ -3,6 +3,9 @@ import { Portal } from "solid-js/web"
 import { MarkdownProvider, useMarkdown } from "@opencode/session-ui/context/markdown"
 import { ExtensionContext, Slot, Style, type MountedSession, type SlotMap } from "@opencode/gui-extensions/sdk"
 import { useExtensionHost } from "./host"
+import { usePlatform } from "@/runtime/platform/platform"
+import { useLanguage } from "@/runtime/i18n/language"
+import { fileManagerApp } from "@/home/projects/file-manager"
 
 /**
  * Renders one extension contribution with its context and error isolation: a contribution that throws records the
@@ -68,11 +71,20 @@ export function ExtensionStyles() {
 export function ExtensionLinks(props: ParentProps<{ session: MountedSession }>) {
   const host = useExtensionHost()
   const markdown = useMarkdown()
+  const platform = usePlatform()
+  const language = useLanguage()
 
   return (
     <MarkdownProvider
       readImage={markdown?.readImage}
       openLocalFile={(href) => void host.links.open({ href, session: props.session })}
+      localFileReveal={(href) => {
+        const run = host.links.reveal({ href, session: props.session })
+
+        if (!run) return
+
+        return { label: language.t(fileManagerApp(platform.os ?? "unknown").actionLabel), run }
+      }}
     >
       {props.children}
     </MarkdownProvider>

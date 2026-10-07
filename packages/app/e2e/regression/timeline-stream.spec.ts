@@ -13,6 +13,7 @@ import {
   directory,
   messageUpdated,
   partUpdated,
+  partDelta,
   reasoningPart,
   renderedPartID,
   session,
@@ -21,6 +22,7 @@ import {
   shell,
   status,
   stepStarted,
+  stepStreamed,
   textPart,
   toolPart,
   userMessage,
@@ -40,7 +42,220 @@ const completed = {
   time: { created: 2, completed: 3 },
 } satisfies SessionMessageAssistant
 
+test("reanchors quoted text after streamed Markdown changes in both text directions", async ({ page }) => {
+  const textID = "prt_quoted_text"
+
+  const quote = {
+    sessionID,
+    messageID: assistantID,
+    userMessageID: "msg_1000_timeline_user",
+    partID: `${assistantID}:text:0`,
+    text: "same quote",
+    start: "Earlier same quote. Target ".length,
+    end: "Earlier same quote. Target same quote".length,
+    before: "Earlier same quote. Target ",
+    after: " after.",
+    number: 1,
+  }
+
+  const annotation = userMessage([userText("Explain that passage")], {
+    id: "msg_2000_annotation",
+    created: 1700000002000,
+  })
+
+  annotation.metadata = {
+    displayText: "Explain that passage",
+    comments: [
+      {
+        type: "note",
+        origin: "message",
+        icon: "comment",
+        label: "Quote 1",
+        subject: "a message",
+        comment: "Clarify this",
+        quote,
+      },
+      {
+        type: "note",
+        origin: "message",
+        icon: "comment",
+        label: "Quote 1",
+        subject: "a message",
+        comment: "Compare this too",
+        quote,
+      },
+    ],
+  }
+
+  const timeline = await setupTimeline(page, {
+    messages: [
+      userMessage(),
+      assistantMessage([textPart(textID, "Earlier same quote. Target **same quote** after.")], { completed: false }),
+      annotation,
+    ],
+  })
+
+  const body = page.locator(`[data-timeline-part-id="${quote.partID}"] [data-slot="text-part-body"]`)
+  const marker = page.locator('[data-component="message-quote-marker"]')
+  const markdown = body.locator('[data-component="markdown"]')
+
+  await expect(marker).toHaveCount(2)
+  await expect(page.getByRole("button", { name: "Quote 1: same quote — Clarify this" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Quote 1: same quote — Compare this too" })).toBeVisible()
+  expect(
+    await marker.evaluateAll((elements) => {
+      const [first, second] = elements.map((element) => element.getBoundingClientRect())
+
+      return !!first && !!second && first.bottom <= second.top
+    }),
+  ).toBe(true)
+
+  await page.evaluate(() => {
+    document.documentElement.dir = "ltr"
+  })
+
+  for (const direction of ["ltr", "rtl"] as const) {
+    await timeline.send(
+      partUpdated(
+        textPart(
+          textID,
+          `${direction === "rtl" ? "مرحبا بالعالم. " : "New introduction. "}Earlier same quote. Target _same quote_ after. ${direction}`,
+        ),
+      ),
+    )
+    await expect(body).toContainText(`after. ${direction}`)
+    await expect(markdown).toHaveCSS("direction", direction)
+    await expect
+      .poll(() =>
+        body.evaluate((element) => {
+          const highlight = CSS.highlights.get("message-quotes")
+          const range = highlight ? Array.from(highlight)[0] : undefined
+
+          if (!(range instanceof Range) || !element.contains(range.startContainer)) return undefined
+          const prefix = range.cloneRange()
+
+          prefix.selectNodeContents(element)
+          prefix.setEnd(range.startContainer, range.startOffset)
+
+          return { text: range.toString(), prefix: prefix.toString().endsWith("Earlier same quote. Target ") }
+        }),
+      )
+      .toEqual({ text: "same quote", prefix: true })
+    await expect(marker.first()).toBeVisible()
+    await expect
+      .poll(async () => {
+        const rect = await marker.first().boundingBox()
+        const quoteRect = await body.locator("em").boundingBox()
+
+        if (!rect || !quoteRect) return false
+
+        return direction === "rtl" ? rect.x + rect.width <= quoteRect.x : rect.x >= quoteRect.x + quoteRect.width
+      })
+      .toBe(true)
+  }
+
+  const beforeReflow = await page.locator('[data-component="message-quote-marker-group"]').boundingBox()
+  const quoteBodyHeight = await body.evaluate((element) => element.getBoundingClientRect().height)
+
+  await page
+    .locator('[data-message-id="msg_1000_timeline_user"] [data-component="user-message"]')
+    .evaluate((element) => {
+      element.style.marginBottom = "120px"
+    })
+  await expect
+    .poll(async () => {
+      const after = await page.locator('[data-component="message-quote-marker-group"]').boundingBox()
+
+      return beforeReflow && after ? after.y - beforeReflow.y : 0
+    })
+    .toBeGreaterThan(80)
+  expect(await body.evaluate((element) => element.getBoundingClientRect().height)).toBe(quoteBodyHeight)
+})
+
 test.describe("static projection", () => {
+  test("shows persisted date/time before messages without changing their text", async ({ page }, testInfo) => {
+    // No existing keeper checks a display-only timestamp or its stable identity.
+    await setupTimeline(page, {
+      messages: [
+        userMessage([userText("Original user text")]),
+        assistantMessage([textPart("prt_original", "Original assistant text")]),
+      ],
+    })
+    const userRow = page.locator('[data-timeline-row="UserMessage"]')
+    const assistantRow = page.locator('[data-timeline-row="AssistantPart"]', { hasText: "Original assistant text" })
+    for (const [row, iso] of [
+      [userRow, "2023-11-14T22:13:20.000Z"],
+      [assistantRow, "2023-11-14T22:13:21.000Z"],
+    ] as const) {
+      const stamp = row.getByLabel("Message date and time")
+      await expect(stamp).toBeVisible()
+      await expect(stamp).toHaveAttribute("datetime", iso)
+      await expect(stamp).toHaveText(/\d.*\d/)
+    }
+    await expect(userRow.locator('[data-slot="user-message-text"]')).toHaveText("Original user text")
+    await expect(assistantRow.locator('[data-component="markdown"]')).toHaveText("Original assistant text")
+    expect(
+      await assistantRow.evaluate((row) => {
+        const stamp = row.querySelector("time")!
+        const text = row.querySelector('[data-component="markdown"]')!
+        return !!(stamp.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING)
+      }),
+    ).toBe(true)
+    for (const row of [userRow, assistantRow]) {
+      expect(
+        await row.evaluate((row) => {
+          const stamp = row.querySelector("time")!.getBoundingClientRect()
+          const body = row
+            .querySelector('[data-slot="user-message-text"], [data-component="markdown"]')!
+            .getBoundingClientRect()
+          return stamp.bottom <= body.top && body.top - stamp.bottom <= 8
+        }),
+      ).toBe(true)
+    }
+    await page.screenshot({ path: testInfo.outputPath("chat-timestamps.png") })
+    await page.reload()
+    await expect(userRow.getByLabel("Message date and time")).toHaveAttribute("datetime", "2023-11-14T22:13:20.000Z")
+    await page.keyboard.press("Control+,")
+    const settings = page.getByTestId("settings-screen")
+    await settings.getByRole("tab", { name: "Appearance", exact: true }).click()
+    await settings.getByRole("switch", { name: "Message date and time", exact: true }).press("Space")
+    await settings.getByRole("button", { name: "Back to app", exact: true }).click()
+    await expect(userRow.getByLabel("Message date and time")).toHaveCount(0)
+    await expect(userRow.locator('[data-slot="user-message-meta-tail"]')).toBeAttached()
+  })
+
+  test("speed indicator distinguishes live estimates, tool waiting and final usage", async ({ page }, testInfo) => {
+    const timeline = await setupTimeline(page, { messages: [userMessage()] })
+    const meter = page.getByRole("status", { name: "Generation speed" })
+    await expect(meter).toHaveCount(0)
+    await page.clock.setFixedTime(new Date("2026-10-06T06:00:00Z"))
+    await timeline.send(stepStarted(assistantMessage()))
+    await timeline.send(partUpdated(textPart("prt_speed", "")))
+    await timeline.send(partDelta("prt_speed", "Live generation"))
+    await expect(meter).toHaveText(/^≈ .*tok\/s$/)
+    await expect(meter).toHaveAttribute("title", /Estimated streamed text and visible reasoning/)
+    await page.clock.setFixedTime(new Date("2026-10-06T06:00:01Z"))
+    await expect(meter).toHaveText(/^≈ \d.*tok\/s$/)
+    // The message is still streaming: timestamps must not wait for completion.
+    const stamp = page
+      .locator('[data-timeline-row="AssistantPart"]', { hasText: "Live generation" })
+      .getByLabel("Message date and time")
+    await expect(stamp).toBeVisible()
+    await expect(stamp).toHaveAttribute("datetime", "2023-11-14T22:13:21.000Z")
+    await page.screenshot({ path: testInfo.outputPath("live-speed.png") })
+    await timeline.send(stepStreamed())
+    await expect(meter).toHaveCount(0)
+    await timeline.send(messageUpdated(completedAssistantInfo(assistantMessage())))
+    await expect(meter).toHaveText(/tok\/s · request avg$/)
+    await expect(meter).toHaveAttribute(
+      "title",
+      /Includes initial model waiting and all reported output; excludes tool waits after the stream/,
+    )
+    await expect(stamp).toHaveAttribute("datetime", "2023-11-14T22:13:21.000Z")
+    await timeline.send(stepStarted(assistantMessage([], { id: "msg_new_step" })))
+    await expect(meter).toHaveCount(0)
+  })
+
   test("renders current protocol notices in CLI order", async ({ page }) => {
     const ownerWarnings: string[] = []
     page.on("console", (message) => {
@@ -741,8 +956,8 @@ test.describe("Working", () => {
   })
 })
 
-test.describe("background shortcut", () => {
-  test("offers a standalone running subagent to the background with Ctrl+B", async ({ page }) => {
+test.describe("background work", () => {
+  test("keeps a standalone running subagent visible without a manual background action", async ({ page }) => {
     await setupTimeline(page, {
       settings: { timelineDetail: { ...detailed, subagents: { placement: "separate" } } },
       sessionMessages: [user, runningSubagent()],
@@ -752,23 +967,20 @@ test.describe("background shortcut", () => {
     await expect(card).not.toContainText("(background)")
     await expect(page.getByText("Called `subagent`", { exact: false })).toHaveCount(0)
     await expect(page.locator('[data-component="background-tool-control"]')).toHaveCount(0)
-    const hint = backgroundHint(page)
-    await expect(hint).toBeVisible()
+    await expect(backgroundHint(page)).toHaveCount(0)
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
-    await expect
-      .poll(async () => {
-        const [cardBox, hintBox] = await Promise.all([card.boundingBox(), hint.boundingBox()])
-
-        if (!cardBox || !hintBox) return undefined
-
-        return { aligned: Math.abs(cardBox.x - hintBox.x) < 2, ordered: cardBox.y < hintBox.y }
-      })
-      .toEqual({ aligned: true, ordered: true })
-    await expectBackgroundRequest(page)
+    await page.keyboard.press("ControlOrMeta+Shift+P")
+    const palette = page.getByRole("dialog")
+    await expect(palette.getByRole("textbox")).toBeFocused()
+    await expect(palette.getByRole("option")).not.toHaveCount(0)
+    await expect(palette.getByRole("option", { name: /Move to background/i })).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await expect(palette).toHaveCount(0)
+    await expect(card).toContainText("Inspect code")
   })
 
   for (const name of ["read", "shell", "subagent"] as const) {
-    test(`keeps Working and the shortcut for a grouped running ${name}`, async ({ page }) => {
+    test(`keeps Working and disclosure for a grouped running ${name}`, async ({ page }) => {
       await setupTimeline(page, {
         viewport: { width: name === "shell" ? 390 : 1400, height: 900 },
         settings: { timelineDetail: detailed },
@@ -798,10 +1010,7 @@ test.describe("background shortcut", () => {
       await expect(trigger).toHaveAttribute("aria-expanded", "false")
       await expect(working).toBeInViewport()
 
-      if (name !== "read") {
-        await expect(backgroundHint(page)).toBeInViewport()
-        await expect(page.locator('[data-component="session-background-hint-row"]')).toHaveCSS("height", "24px")
-      }
+      await expect(backgroundHint(page)).toHaveCount(0)
 
       await trigger.click()
       await expect(trigger).toHaveAttribute("aria-expanded", "true")
@@ -815,7 +1024,6 @@ test.describe("background shortcut", () => {
       await expect(trigger).toHaveAttribute("aria-expanded", "false")
       await expect(working).toBeVisible()
 
-      if (name !== "read") await expectBackgroundRequest(page)
     })
   }
 
@@ -912,7 +1120,7 @@ test.describe("background shortcut", () => {
       },
     })
     const backgroundCard = page.locator('[data-timeline-part-id="call_backgrounded"]')
-    await expect(backgroundHint(page)).toBeVisible()
+    await expect(backgroundHint(page)).toHaveCount(0)
 
     const used = page
       .locator('[data-timeline-part-ids="call_backgrounded,call_shell_backgrounded,call_blocking"]')
@@ -1087,7 +1295,7 @@ test.describe("background shortcut", () => {
 })
 
 test.describe("compaction", () => {
-  test("renders compaction progress, summary, and outcome in order", async ({ page }) => {
+  test("keeps live and completed compaction summaries under an opt-in disclosure", async ({ page }, testInfo) => {
     const timeline = await setupTimeline(page, {
       settings: { timelineDetail: { ...detailed, notices: { placement: "separate" } } },
       sessionMessages: [user, completed],
@@ -1100,6 +1308,9 @@ test.describe("compaction", () => {
     await expect(compaction.getByRole("status").getByLabel("Compacting", { exact: true })).toBeVisible()
     await expect(compaction.locator('[data-component="text-shimmer"]')).toHaveAttribute("data-active", "true")
     await expect(compaction.getByText("Session compacted", { exact: true })).toHaveCount(0)
+    const showSummary = compaction.getByRole("button", { name: "Show compaction summary", exact: true })
+    const hideSummary = compaction.getByRole("button", { name: "Hide compaction summary", exact: true })
+    await expect(showSummary).toHaveAttribute("aria-expanded", "false")
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
     await expect(page.locator('[data-component="session-working"]')).toHaveCount(0)
 
@@ -1107,8 +1318,16 @@ test.describe("compaction", () => {
     await expect(compaction.getByText("Session compaction started", { exact: true })).toBeInViewport()
 
     await timeline.send(compactionDelta({ sessionID, text: "## Checkpoint\n\nStreamed implementation details." }))
+    await expect(compaction.locator('[data-component="text-part"]')).toHaveCount(0)
+    await expect(compaction).not.toContainText("Streamed implementation details.")
+    await page.screenshot({ path: testInfo.outputPath("compaction-collapsed.png") })
+    await showSummary.click()
+    await expect(hideSummary).toHaveAttribute("aria-expanded", "true")
     await expect(compaction.getByRole("heading", { name: "Checkpoint" })).toBeVisible()
     await expect(compaction).toContainText("Streamed implementation details.")
+    await timeline.send(compactionDelta({ sessionID, text: " More streamed details." }))
+    await expect(compaction).toContainText("Streamed implementation details. More streamed details.")
+    await page.screenshot({ path: testInfo.outputPath("compaction-live-expanded.png") })
     const running = compaction.getByRole("status").getByLabel("Compacting", { exact: true })
     await expect(running).toBeVisible()
     await expect
@@ -1120,6 +1339,10 @@ test.describe("compaction", () => {
       })
       .toBe(true)
     await expect(compaction.getByText("Session compacted", { exact: true })).toHaveCount(0)
+    await hideSummary.click()
+    await expect(showSummary).toHaveAttribute("aria-expanded", "false")
+    await timeline.send(compactionDelta({ sessionID, text: " Still hidden while generation continues." }))
+    await expect(compaction.locator('[data-component="text-part"]')).toHaveCount(0)
 
     await timeline.send(
       compactionEnded({
@@ -1129,6 +1352,11 @@ test.describe("compaction", () => {
         recent: "",
       }),
     )
+    await expect(showSummary).toHaveAttribute("aria-expanded", "false")
+    await expect(compaction.locator('[data-component="text-part"]')).toHaveCount(0)
+    await expect(compaction).not.toContainText("Final implementation details.")
+    await showSummary.press("Enter")
+    await expect(hideSummary).toHaveAttribute("aria-expanded", "true")
     await expect(compaction).toContainText("Final implementation details.")
     await expect(compaction).not.toContainText("Streamed implementation details.")
     await expect(compaction.getByText("Session compaction started", { exact: true })).toBeVisible()
@@ -1144,6 +1372,36 @@ test.describe("compaction", () => {
     await expect(compaction.getByRole("status")).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
     await expect(page.locator('[data-component="session-working"]')).toBeVisible()
+  })
+
+  test("saved compaction summaries start closed when loading history", async ({ page }) => {
+    // The live keeper above cannot prove the restored-history default.
+    await setupTimeline(page, {
+      sessionMessages: [
+        user,
+        completed,
+        {
+          id: "msg_saved_compaction",
+          type: "compaction",
+          status: "completed",
+          reason: "manual",
+          summary: "Saved compaction details.",
+          recent: "",
+          time: { created: 1700000004000 },
+        },
+      ],
+    })
+    const compaction = page.locator('[data-component="session-compaction-message"]')
+    const showSummary = compaction.getByRole("button", { name: "Show compaction summary", exact: true })
+    await expect(compaction.getByText("Session compacted", { exact: true })).toBeVisible()
+    await expect(showSummary).toHaveAttribute("aria-expanded", "false")
+    await expect(compaction.locator('[data-component="text-part"]')).toHaveCount(0)
+    await page.reload()
+    await expect(showSummary).toHaveAttribute("aria-expanded", "false")
+    await showSummary.click()
+    await expect(compaction).toContainText("Saved compaction details.")
+    await compaction.getByRole("button", { name: "Hide compaction summary", exact: true }).press("Space")
+    await expect(compaction.locator('[data-component="text-part"]')).toHaveCount(0)
   })
 
   const outcomes = {
@@ -1193,6 +1451,7 @@ test.describe("compaction", () => {
         await timeline.send(compactionDelta({ sessionID, text: outcome.partial }))
         await expect(compactions).toHaveCount(index + 1)
         const compaction = compactions.nth(index)
+        await compaction.getByRole("button", { name: "Show compaction summary", exact: true }).click()
         await expect(compaction).toContainText(outcome.partial)
 
         if (name === "interrupted") {
@@ -1224,6 +1483,7 @@ test.describe("compaction", () => {
         await expect(compaction.getByText("Session compacted", { exact: true })).toHaveCount(0)
         await expect(compaction.getByRole("status")).toHaveCount(0)
         await expect(compaction).not.toContainText(outcome.partial)
+        await expect(compaction.getByRole("button", { name: "Show compaction summary", exact: true })).toHaveCount(0)
 
         if (outcome.shown) await expect(compaction.getByText(outcome.shown, { exact: true })).toBeVisible()
 
@@ -1512,16 +1772,6 @@ function runningSubagent(): SessionMessageAssistant {
 
 function backgroundHint(page: Page) {
   return page.getByRole("button", { name: /move running work to the background/i })
-}
-
-async function expectBackgroundRequest(page: Page) {
-  const request = page.waitForRequest(
-    (request) =>
-      request.method() === "POST" && new URL(request.url()).pathname === `/api/session/${sessionID}/background`,
-  )
-
-  await page.keyboard.press("Control+b")
-  await request
 }
 
 function patchFile(file: string, status: "added" | "modified" | "deleted") {

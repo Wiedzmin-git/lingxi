@@ -1,8 +1,306 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import { NO_PROVIDER, T0, provider } from "../utils/app"
-import { openDraft, openSession } from "../utils/workspace"
+import { NO_PROVIDER, T0, provider, session, SERVER, REMOTE_SERVER } from "../utils/app"
+import { mockRemoteServer, openDraft, openSession } from "../utils/workspace"
+import type { SessionMessageInfo } from "@opencode/client/promise"
+import { storedSessionDraft } from "../utils/drafts"
+import type { MockServerConfig } from "../utils/mock-server"
+import { sessionHref } from "../utils/app"
 
 test.use({ permissions: ["clipboard-read", "clipboard-write"] })
+
+for (const surface of ["horizontal", "vertical", "compact", "horizontal-title", "vertical-title"] as const) {
+test(`drags inactive branches into ordered removable chips without switching or sending (${surface})`, async ({ page }) => {
+  const admissions: Parameters<NonNullable<MockServerConfig["onPrompt"]>>[0][] = []
+  const target = "ses_ref_current"
+  const peers = [{ id: "ses_ref_first", title: 'ЦОН "<b>"' }, { id: "ses_ref_second", title: 'ЦОН "<b>"' }]
+  const tabLayout = surface.startsWith("vertical") ? "vertical" : "horizontal"
+  const titleDrag = surface.endsWith("-title")
+  const dense = surface === "compact" ? Array.from({ length: 36 }, (_, index) => ({ id: `ses_dense_${index}`, title: `Dense ${index}` })) : []
+  const { editor } = await openSession(page, { name: "BranchReferences", sessionID: target,
+    sessions: [{ id: target, title: "Current branch" }, ...peers, ...dense], seed: { settings: { appearance: { tabLayout } } }, onPrompt: (input) => admissions.push(input) })
+  await editor.fill("before ")
+  const source = (id: string) => page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(id)}"]) ${titleDrag ? "[data-titlebar-tab-title]" : "[data-session-reference-drag]"}`)
+  if (!titleDrag) {
+    await source(peers[0].id).click()
+    await expect(page).toHaveURL(new RegExp(`${target}$`))
+    await expect(source(peers[0].id)).toHaveAttribute("title", "Drag branch reference into a prompt")
+  }
+  await source(peers[0].id).hover()
+  await page.mouse.down()
+  await editor.hover()
+  await editor.hover()
+  await expect(page.getByText("Drop in the message box to insert a branch reference", { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`${target}$`))
+  expect(admissions).toEqual([])
+  await page.mouse.up()
+  await expect(editor.locator('[data-mention="session"]')).toHaveCount(1)
+  await expect(page.locator('[data-component="session-dropzone"][data-visible="true"]')).toHaveCount(0)
+  await expect(page).toHaveURL(new RegExp(`${target}$`))
+  const first = editor.locator('[data-mention="session"]').filter({ hasText: peers[0].title })
+  await expect(first).toHaveAttribute("title", peers[0].id)
+  await editor.press("End")
+  await editor.pressSequentially(" between ")
+  await source(peers[1].id).dragTo(editor)
+  const chips = editor.locator('[data-mention="session"]')
+  await expect(chips).toHaveCount(2)
+  await expect(editor).toContainText("before")
+  await expect(editor).toContainText("between")
+  expect(admissions).toEqual([])
+  await expect.poll(async () => {
+    const stored = await storedSessionDraft(page, target)
+    return peers.every((peer) => stored.includes(peer.id)) && stored.includes("between")
+  }).toBe(true)
+  await page.reload()
+  await expect(chips).toHaveCount(2)
+  await expect(chips.nth(0)).toHaveAttribute("title", peers[0].id)
+  await expect(chips.nth(1)).toHaveAttribute("title", peers[1].id)
+  await chips.nth(0).getByRole("button", { name: "Remove attachment" }).click()
+  await expect(chips).toHaveCount(1)
+  await expect(chips).toHaveAttribute("title", peers[1].id)
+  await expect(editor).toContainText("between")
+  expect(admissions).toEqual([])
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect.poll(() => admissions.length).toBe(1)
+  expect(admissions[0].sessionID).toBe(target)
+  expect(admissions[0].body.text).toContain('"sessionID":"ses_ref_second"')
+  expect(admissions[0].body.text).not.toContain("ses_ref_first")
+})
+}
+
+test("new-session draft distinguishes branch-reference dragging, cancellation and file dragging", async ({ page }) => {
+  const peer = "ses_draft_reference_peer"
+  const { editor } = await openDraft(page, { name: "DraftReferenceDrag", sessions: [{ id: peer, title: "Draft colleague" }] })
+  const source = page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(peer)}"]) [data-session-reference-drag]`)
+  const transfer = await page.evaluateHandle(() => new DataTransfer())
+  await source.dispatchEvent("dragstart", { dataTransfer: transfer })
+  await editor.dispatchEvent("dragenter", { dataTransfer: transfer })
+  await expect(page.getByText("Drop in the message box to insert a branch reference", { exact: true })).toBeVisible()
+  await source.dispatchEvent("dragend", { dataTransfer: transfer })
+  await expect(page.locator('[data-component="session-dropzone"][data-visible="true"]')).toHaveCount(0)
+  await expect(editor).toHaveText("")
+  await editor.dispatchEvent("dragenter", { dataTransfer: transfer })
+  await editor.dispatchEvent("drop", { dataTransfer: transfer })
+  await expect(editor.locator('[data-mention="session"]')).toHaveAttribute("title", peer)
+  await transfer.dispose()
+  const file = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer()
+    transfer.items.add(new File(["fixture"], "reference-file.txt", { type: "text/plain" }))
+    return transfer
+  })
+  await editor.dispatchEvent("dragover", { dataTransfer: file })
+  await expect(page.locator('[data-component="session-dropzone"][data-visible="true"]')).toContainText("Drop files to add")
+  await editor.dispatchEvent("drop", { dataTransfer: file })
+  await expect(page.locator('[data-component="composer-attachments"]')).toContainText("reference-file.txt")
+  await expect(editor.locator('[data-mention="session"]')).toHaveAttribute("title", peer)
+  await expect(page.locator('[data-component="session-dropzone"][data-visible="true"]')).toHaveCount(0)
+  await file.dispose()
+})
+
+test("restored branch history retains its server and cannot silently address an identical ID on another server", async ({ page }) => {
+  const local: Parameters<NonNullable<MockServerConfig["onPrompt"]>>[0][] = []
+  const remote: Parameters<NonNullable<MockServerConfig["onPrompt"]>>[0][] = []
+  const target = "ses_reference_origin"
+  const peer = "ses_reference_peer"
+  await mockRemoteServer(page, { provider: provider(), sessions: [session({ id: target, title: "Other server", directory: "/remote/project", projectID: "proj_remote" }),
+    session({ id: peer, title: "Same title", directory: "/remote/project", projectID: "proj_remote" })], onPrompt: (input) => remote.push(input) })
+  const { editor } = await openSession(page, { name: "ReferenceOrigin", sessionID: target,
+    sessions: [{ id: target, title: "Origin server" }, { id: peer, title: "Same title" }],
+    seed: { tabs: [target, peer, { session: target, server: REMOTE_SERVER }] }, onPrompt: (input) => local.push(input) })
+  await editor.fill("Consult ")
+  await page.locator(`[data-titlebar-tab-slot]:has(a[href="${sessionHref(peer)}"]) [data-session-reference-drag]`).dragTo(editor)
+  await expect(editor.locator('[data-mention="session"]')).toHaveAttribute("title", peer)
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect.poll(() => local.length).toBe(1)
+  expect(local[0].body.metadata).toMatchObject({ sessionReferences: [{ sessionID: peer, server: SERVER }] })
+  await expect(editor).toHaveText("")
+  await page.locator(`a[data-titlebar-tab-link][href="${sessionHref(target, REMOTE_SERVER)}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`${sessionHref(target, REMOTE_SERVER)}$`))
+  await expect(editor).toBeEditable()
+  await editor.press("ArrowUp")
+  await expect(editor.locator('[data-mention="session"]')).toHaveAttribute("title", peer)
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page.getByText("Branch reference belongs to another server", { exact: true })).toBeVisible()
+  expect(remote).toEqual([])
+  await expect(editor.locator('[data-mention="session"]')).toHaveAttribute("title", peer)
+  await editor.locator('[data-mention="session"]').getByRole("button", { name: "Remove attachment" }).click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect.poll(() => remote.length).toBe(1)
+  expect(remote[0].body.text).not.toContain(peer)
+})
+
+test("adds, persists, edits, removes and submits chat quotes with source details", async ({ page }) => {
+  const quote = {
+    sessionID: "ses_quotes",
+    messageID: "msg_answer",
+    userMessageID: "msg_question",
+    partID: "msg_answer:text:0",
+    text: "quoted answer",
+    start: 4,
+    end: 17,
+    before: "The ",
+    after: " is here.\n",
+    number: 1,
+  }
+
+  const messages: SessionMessageInfo[] = [
+    { id: "msg_question", type: "user", text: "A question", time: { created: T0 } },
+    {
+      id: "msg_answer",
+      type: "assistant",
+      agent: "build",
+      model: { providerID: "opencode", id: "claude-opus-4-6" },
+      content: [{ type: "text", text: "The **quoted answer** is here." }],
+      time: { created: T0 + 1, completed: T0 + 2 },
+    },
+    {
+      id: "msg_sent",
+      type: "user",
+      text: "An earlier comment",
+      time: { created: T0 + 3 },
+      metadata: {
+        displayText: "An earlier comment",
+        comments: [
+          {
+            type: "note",
+            origin: "message",
+            label: "Quote 1",
+            icon: "comment",
+            subject: "message msg_answer",
+            comment: "Already submitted",
+            quote,
+          },
+        ],
+      },
+    },
+  ]
+
+  const admissions: Parameters<NonNullable<MockServerConfig["onPrompt"]>>[0][] = []
+  const history = Promise.withResolvers<void>()
+  await openSession(page, {
+    name: "MessageQuotes",
+    sessions: [{ id: "ses_quotes" }],
+    pageMessages: (_, __, before) =>
+      before ? { items: messages.slice(0, 2) } : { items: messages.slice(2), cursor: "msg_sent" },
+    beforeMessagesResponse: (input) => (input.before ? history.promise : Promise.resolve()),
+    onPrompt: (input) => admissions.push(input),
+  })
+
+  const body = page.locator('[data-timeline-part-id="msg_answer:text:0"] [data-slot="text-part-body"]')
+  const editor = page.locator('[data-component="composer-editor"]')
+
+  const sent = page
+    .locator('[data-component="user-message"] [data-component="attachment-card"]')
+    .filter({ hasText: "Already submitted" })
+
+  await sent.click()
+  const details = page.getByRole("dialog")
+  await expect(details.getByText("quoted answer", { exact: true })).toBeVisible()
+  await expect(details.getByText("Already submitted", { exact: true })).toBeVisible()
+  await details.getByRole("button", { name: "Go to source" }).click()
+  await expect(page).toHaveURL(/#message-msg_question$/)
+  history.resolve()
+  await expect(details).toHaveCount(0)
+  await expect(page.locator("[data-dialog-layer]")).toHaveCount(0)
+  await expect(body).toContainText("The quoted answer is here.")
+
+  await body.locator("strong").evaluate((element) => {
+    const selection = window.getSelection()
+    const range = document.createRange()
+
+    range.selectNodeContents(element)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  // Playwright cannot enable Chromium caret browsing, so establish the static-text range above and use a trusted
+  // keyboard event here to exercise the keyboard path instead of dispatching a synthetic KeyboardEvent.
+  await page.keyboard.press("Shift")
+  await expect(page.getByRole("button", { name: "Add comment", exact: true })).toBeFocused()
+  await page.evaluate(() => window.getSelection()?.removeAllRanges())
+  await body.click()
+  await expect(page.locator('[data-component="message-quote-popover"]')).toHaveCount(0)
+
+  const select = async () => {
+    const box = await body.locator("strong").boundingBox()
+
+    if (!box) throw new Error("Missing quote source bounds")
+
+    await page.mouse.move(box.x + 1, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 })
+    await page.mouse.up()
+    await expect(page.locator('[data-component="message-quote-popover"]')).toBeVisible()
+    await page.getByRole("button", { name: "Add comment", exact: true }).click()
+  }
+
+  await select()
+  const comment = page.getByRole("textbox", { name: "Comment on this quote" })
+  await comment.fill("Draft explanation")
+  await expect(comment).toBeFocused()
+  await page.screenshot({ path: test.info().outputPath("quote-editor.png") })
+  await comment.press("Shift+Enter")
+  await expect(comment).toHaveValue("Draft explanation\n")
+  await comment.press("Escape")
+  await expect(page.locator('[data-slot="composer-attachments-scroll"]')).toHaveCount(0)
+  await expect(editor).toBeFocused()
+  await select()
+  await comment.fill("Draft explanation")
+  await comment.press("Enter")
+  await expect(editor).toBeFocused()
+  const drafts = page.locator('[data-slot="composer-attachments-scroll"]')
+  await expect(drafts.getByText("Draft explanation", { exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("quote-draft.png") })
+  await expect.poll(() => storedSessionDraft(page, "ses_quotes")).toContain("Draft explanation")
+  const stored = await storedSessionDraft(page, "ses_quotes")
+  await page.reload()
+  await expect(drafts.getByText("Draft explanation", { exact: true })).toBeVisible()
+  expect(stored).toContain('"sessionID":"ses_quotes"')
+  expect(stored).toContain('"messageID":"msg_answer"')
+  expect(stored).toContain('"userMessageID":"msg_question"')
+  expect(stored).toContain('"partID":"msg_answer:text:0"')
+  expect(stored).toContain('"text":"quoted answer"')
+  expect(stored).toContain('"start":4')
+  expect(stored).toContain('"end":17')
+  expect(stored).toContain('"before":"The "')
+  expect(stored).toContain('"after":" is here.\\n"')
+  await drafts.getByRole("button", { name: "Draft explanation", exact: true }).click()
+  await comment.fill("Edited explanation")
+  await comment.press("Enter")
+  await expect(drafts.getByText("Edited explanation", { exact: true })).toBeVisible()
+  await expect.poll(() => storedSessionDraft(page, "ses_quotes")).toContain("Edited explanation")
+  await expect.poll(() => storedSessionDraft(page, "ses_quotes")).not.toContain("Draft explanation")
+  await drafts.getByRole("button", { name: "Remove attachment", exact: true }).click()
+  await expect(drafts).toHaveCount(0)
+  await expect.poll(() => storedSessionDraft(page, "ses_quotes")).toContain('"items":[]')
+  await page.reload()
+  await expect(drafts).toHaveCount(0)
+  await select()
+  await comment.fill("Final explanation")
+  await comment.press("Enter")
+  await expect(editor).toBeFocused()
+  await expect.poll(() => storedSessionDraft(page, "ses_quotes")).toContain("Final explanation")
+  await page.reload()
+  await expect(drafts.getByText("Final explanation", { exact: true })).toBeVisible()
+  await expect(drafts.locator('[data-component="attachment-card"]')).toHaveCount(1)
+  await editor.click()
+  await editor.press("Enter")
+  await expect.poll(() => admissions.length).toBe(1)
+  const finalQuote = quote
+
+  expect(admissions[0]?.sessionID).toBe("ses_quotes")
+  expect(admissions[0]?.body.metadata).toMatchObject({
+    comments: [
+      expect.objectContaining({ type: "note", origin: "message", comment: "Final explanation", quote: finalQuote }),
+    ],
+  })
+  expect(admissions[0]?.body.text).toEqual(expect.stringContaining(JSON.stringify(finalQuote.text)))
+  expect(admissions[0]?.body.text).toEqual(
+    expect.stringContaining(
+      JSON.stringify({ sessionID: finalQuote.sessionID, messageID: finalQuote.messageID, partID: finalQuote.partID }),
+    ),
+  )
+  expect(admissions[0]?.body.text).toEqual(expect.stringContaining("Final explanation"))
+  await expect(drafts).toHaveCount(0)
+})
 
 async function draft(page: Page) {
   const { editor } = await openDraft(page, { name: "ComposerDraft", provider: NO_PROVIDER })

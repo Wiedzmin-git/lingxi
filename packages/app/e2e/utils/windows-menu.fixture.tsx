@@ -5,9 +5,10 @@ import type { Bridge } from "@opencode/gui-extensions/sdk/bridge"
 import { AppBaseProviders, AppInterface } from "../../src/app"
 import { PlatformProvider, type Platform } from "../../src/runtime/platform/platform"
 import { ServerConnection } from "../../src/runtime/server/registry"
+import type { SessionLinkResult } from "../../src/runtime/platform/session-link"
 
 // The app on a Windows desktop platform, so the titlebar shows the app menu. Menu actions are listed in an output.
-export function mount(input: { server: string }) {
+export function mount(input: { server: string; mailbox?: boolean; reception?: boolean }) {
   const root = document.getElementById("root")
 
   if (!root) throw new Error("Missing fixture root")
@@ -51,12 +52,28 @@ export function mount(input: { server: string }) {
       restart: unused,
       extensions: bridge,
       runDesktopMenuAction: (action) => setStore("actions", (actions) => [...actions, action]),
+      sessionLink: input.mailbox ? async (request): Promise<SessionLinkResult> => {
+        if (input.reception && request.operation === "status") return await fetch(`/e2e/branch-reception?${new URLSearchParams({ server: request.server, sessionID: request.sessionID ?? "" })}`).then((response) => response.json())
+        if (request.operation === "status") return { listener: "disabled", branchAddress: { active: false, wake: false },
+          config: { enabled: false, host: "", port: 58321, outgoingNetworks: [], outgoingPorts: [58321], retryHours: 24 } }
+        if (request.operation === "contacts") return { contacts: [] }
+        if (request.operation === "mail") return { mail: Array.from({ length: 12 }, (_, index) => ({
+          kind: "inbox", mailKey: `fixture-${index}`, messageID: `message-${index}`,
+          source: { installationID: "fixture-installation", sessionID: "ses_fixture_peer", computer: "Fixture", user: "Fixture", title: "Fixture branch", agent: "build" },
+          target: { installationID: "fixture-local", sessionID: request.sessionID ?? "ses_fixture" },
+          sentAt: 1, mode: "queue", text: index === 11 ? "Mailbox scroll end" : `Fixture mail ${index}`,
+          status: "accepted", attempts: 1, code: null, wakeAdvised: false, replyKey: null, modelAttemptID: null,
+          observedAt: null, admissionStatus: "accepted", receivedAt: 1, observedIP: null, replyToAddressRef: null,
+          inReplyTo: null, attachments: [],
+        })) }
+        throw new Error("Mailbox layout fixture must not mutate network, contacts or mail")
+      } : undefined,
     }
 
     return (
       <PlatformProvider value={platform}>
         <AppBaseProviders locale="en">
-          <output aria-label="Desktop menu actions">{store.actions.join(",")}</output>
+          <output class="sr-only" aria-label="Desktop menu actions">{store.actions.join(",")}</output>
           <AppInterface
             servers={[{ type: "sidecar", variant: "base", displayName: "Local Server", http: { url: input.server } }]}
             defaultServer={ServerConnection.Key.make("sidecar")}

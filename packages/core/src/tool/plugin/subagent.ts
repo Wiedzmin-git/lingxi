@@ -22,7 +22,7 @@ const backgroundResult = (sessionID: SessionSchema.ID) => ({
   output: [
     `The subagent is working in the background (sessionID: ${sessionID}). You will be notified automatically when it finishes.`,
     "DO NOT sleep, poll for progress, ask the subagent for status, or duplicate this subagent's work; avoid working with the same files or topics it is using.",
-    "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
+    "Start dependent work only after the completion notification, not after this launch receipt. Work on non-overlapping tasks, or end your response and wait for automatic resumption.",
   ].join("\n"),
 })
 
@@ -43,7 +43,7 @@ export const Input = Schema.Struct({
   }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
-      "Run the subagent in the background and return immediately. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress.",
+      "Background execution is the default. Set false only when an immediate tool result is required. You will be notified when it completes; start dependent work only after that notification. DO NOT sleep, poll, or proactively check on its progress.",
   }),
 })
 
@@ -56,9 +56,9 @@ export const description = [
   "Spawns an agent in a child session to work on the specified task.",
   "The output includes a sessionID you can pass back later to continue that specific conversation with the subagent.",
   "New child sessions start with fresh context, so include all relevant context and instructions when you don't pass a sessionID.",
-  "Foreground (default) runs the subagent to completion and returns its final response.",
-  "Background mode (background=true) launches it asynchronously and returns immediately; you are notified when it finishes.",
-  "Use background only for independent work that can run while you continue elsewhere.",
+  "Background execution is the default: launch asynchronously and return immediately; you are notified when it finishes.",
+  "Independent work may overlap. Start dependent work only after the completion notification, not after the launch receipt.",
+  "Explicit background=false waits for completion and returns the final response when an immediate tool result is required.",
 ].join("\n")
 
 export const Plugin = {
@@ -197,7 +197,7 @@ export const Plugin = {
                     ),
                   ))
 
-              const background = input.background === true
+              const background = input.background !== false
               yield* context.progress({ sessionID: child.id, status: "running" })
 
               // Standard prompt admission outside the job: Job.start joining a running child skips
@@ -224,7 +224,7 @@ export const Plugin = {
                 agent: agent.name,
                 description: input.description,
               }
-              yield* subagents.start(recovery)
+              yield* subagents.start(recovery, input.background === undefined)
 
               if (background) {
                 yield* subagents.background(recovery)

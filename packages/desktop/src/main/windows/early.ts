@@ -10,13 +10,19 @@ import { storedBackgroundColor, titlebarOverlay } from "./defaults"
 import { registerRendererProtocol } from "./protocol"
 import { loadWindow } from "./scheme"
 import { allowRendererPermissions, wireNavigationPolicy, wireRendererHeaders } from "./security"
-import { manageWindowState, readWindowState, resolveWindowState, windowStateFile, type WindowState } from "./window-state"
+import {
+  manageWindowState,
+  readWindowState,
+  resolveWindowState,
+  windowStateFile,
+  type WindowState,
+} from "./window-state"
 
 export type EarlyWindow = {
   id: string
   win: BrowserWindow
   state: WindowState
-  shownAt: number
+  shownAt?: number
   // Navigation policy is wired before the layers exist; the adopter swaps in the logged version.
   openExternal: (url: string) => void
 }
@@ -45,13 +51,17 @@ export function createEarlyWindow() {
     y: state.y,
     width: state.width,
     height: state.height,
-    show: true,
+    show: !app.commandLine.hasSwitch("start-hidden"),
     autoHideMenuBar: true,
     title: "OpenCode",
     icon: path.join(icons, `icon.${process.platform === "win32" ? "ico" : "png"}`),
     backgroundColor: storedBackgroundColor(),
-    ...(process.platform === "darwin" ? { titleBarStyle: "hidden" as const, trafficLightPosition: { x: 14, y: 14 } } : {}),
-    ...(process.platform === "win32" ? { frame: false, titleBarStyle: "hidden" as const, titleBarOverlay: titlebarOverlay() } : {}),
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hidden" as const, trafficLightPosition: { x: 14, y: 14 } }
+      : {}),
+    ...(process.platform === "win32"
+      ? { frame: false, titleBarStyle: "hidden" as const, titleBarOverlay: titlebarOverlay() }
+      : {}),
     webPreferences: {
       preload: path.join(root, "../preload/index.cjs"),
       contextIsolation: true,
@@ -71,7 +81,7 @@ export function createEarlyWindow() {
     id,
     win,
     state,
-    shownAt: Date.now(),
+    shownAt: app.commandLine.hasSwitch("start-hidden") ? undefined : Date.now(),
     openExternal: (url) => {
       const target = resolveExternalURL(url)
       if (target) void shell.openExternal(target)

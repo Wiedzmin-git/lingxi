@@ -518,6 +518,14 @@ export interface LinkHandler {
    * @param link - A link `match` accepted.
    */
   open(link: Link): void
+  /**
+   * Returns a user action that reveals the exact target in the system file manager without opening it.
+   * Omit this method, or return undefined, when revealing is unavailable. Obtaining the action has no side effects.
+   * The action must retain its target and report failures; it must not fall back to opening the file.
+   *
+   * @param link - A link `match` accepted.
+   */
+  reveal?(link: Link): (() => void) | undefined
 }
 
 /** A titlebar pill, or the dev channel badge as a toggle. */

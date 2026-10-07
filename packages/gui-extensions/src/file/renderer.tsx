@@ -12,6 +12,7 @@ import {
 } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui/icon"
+import { showToast } from "@opencode/ui/toast"
 import { encodeFilePath, getFilename } from "@opencode/util/path"
 import {
   createKeyed,
@@ -38,7 +39,7 @@ import type { OpenApp } from "./apps"
 import { FileTree, OpenInApp } from "./contract"
 import type File from "./index"
 import { FileVisual } from "./label"
-import { fileTabId, fileTabPath, isFileTab, workspaceFileUrl } from "./path"
+import { fileTabId, fileTabPath, isFileTab, resolveMarkdownRevealPath, workspaceFileUrl } from "./path"
 import tabStyles from "./tabs.css?inline"
 
 const OPEN = "open"
@@ -427,6 +428,32 @@ const setup: Setup<typeof File> = (ctx) => {
   // a browser tab for HTML when the desktop can load the file directly.
   ctx.add(LinkHandler, {
     match: () => true,
+    reveal(link) {
+      const session = sessions.current()
+      const files = ctx.screen.current()?.file
+
+      if (!desktop || !session?.server.local || !files || (link.session && link.session.key !== session.key))
+        return undefined
+
+      const target = resolveMarkdownRevealPath(files.root, link.href, link.base)
+
+      const failed = () => {
+        if (ctx.signal.aborted) return
+
+        showToast({ variant: "error", title: ctx.t("common.requestFailed"), description: ctx.t("reveal.failed") })
+      }
+
+      return () => {
+        if (ctx.signal.aborted) return
+
+        void desktop
+          .reveal(target)
+          .then((revealed) => {
+            if (!revealed) failed()
+          })
+          .catch(failed)
+      }
+    },
     open(link) {
       const session = sessions.current()
       const files = ctx.screen.current()?.file
