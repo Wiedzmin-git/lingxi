@@ -7,6 +7,15 @@ import { logContext } from "./log"
 import { make } from "./machine"
 
 const setup: MainSetup<typeof definition> = async (ctx) => {
+  if (ctx.build.version.includes("-lingxi.")) {
+    const module = await import("./lingxi-main")
+
+    if (ctx.scope.signal.aborted) return
+    module.default(ctx)
+
+    return
+  }
+
   const build = ctx.build
   const lifecycle = ctx.lifecycle
 
@@ -53,6 +62,9 @@ const setup: MainSetup<typeof definition> = async (ctx) => {
     state: () => updater.state(),
     check: () => runPromise(updater.check),
     install: () => runPromise(updater.install),
+    stage: async () => {
+      throw new Error(ctx.t("lingxi.unmanaged"))
+    },
   })
 
   publish.changed = () => provider.changed()

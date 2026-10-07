@@ -26,6 +26,8 @@ export type EnsureReason = "missing" | "version-mismatch"
 
 /** Options used to ensure the local OpenCode service is running. */
 export type EnsureOptions = DiscoverOptions & {
+  /** Synchronous lifecycle observation for an external startup-recovery owner. */
+  readonly onContender?: (event: { phase: "starting" } | { phase: "spawned"; pid: number | undefined }) => void
   /** Preserve an existing registered process instead of replacing it on mismatch or failed probes. Defaults to `replace`. */
   readonly existingService?: "replace" | "preserve"
   /** Service command and arguments. Defaults to `opencode serve --service`. */
@@ -38,6 +40,8 @@ export type EnsureOptions = DiscoverOptions & {
 
 /** Options used to stop the local OpenCode service. */
 export type StopOptions = {
+  /** Stop only this previously observed registration generation; a changed or missing registration fails before terminal handoff. */
+  readonly expected?: Pick<Info, "id" | "version" | "url" | "pid">
   /** Absolute registration file path. Defaults to the XDG state directory. */
   readonly file?: string
   /** How to handle persistent terminals before stopping the service. */

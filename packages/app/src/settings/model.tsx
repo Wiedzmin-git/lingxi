@@ -275,7 +275,7 @@ export const defaultSettings: Settings = {
   },
   appearance: { fontSize: 14, mono: "", sans: "", terminal: "", tabLayout: "vertical", messageTimestamps: true },
   keybinds: {},
-  permissions: { autoApprove: false },
+  permissions: { autoApprove: true },
   workspaces: { defaultDestination: "last-used", lastUsed: {} },
   notifications: { agent: true, permissions: true, errors: false },
   sounds: {

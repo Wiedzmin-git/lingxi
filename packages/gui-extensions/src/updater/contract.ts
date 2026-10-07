@@ -5,15 +5,35 @@ export const UpdaterState = Schema.Union([
   Schema.Struct({ status: Schema.Literal("disabled") }),
   Schema.Struct({ status: Schema.Literal("idle") }),
   Schema.Struct({ status: Schema.Literal("checking") }),
-  Schema.Struct({ status: Schema.Literal("downloading"), version: Schema.String }),
+  Schema.Struct({
+    status: Schema.Literal("downloading"),
+    version: Schema.String,
+    percent: Schema.optional(Schema.Number),
+  }),
   Schema.Struct({ status: Schema.Literal("ready"), version: Schema.String }),
   Schema.Struct({ status: Schema.Literal("download-required"), version: Schema.String }),
   Schema.Struct({ status: Schema.Literal("up-to-date") }),
   Schema.Struct({ status: Schema.Literal("installing"), version: Schema.String }),
   Schema.Struct({ status: Schema.Literal("error"), message: Schema.String }),
+  Schema.Struct({
+    status: Schema.Literal("lingxi-available"),
+    version: Schema.String,
+    sha256: Schema.String,
+    channel: Schema.Literals(["dev", "stable"]),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("lingxi-staged"),
+    version: Schema.String,
+    sha256: Schema.String,
+    channel: Schema.Literals(["dev", "stable"]),
+  }),
 ])
 
 export type UpdaterState = typeof UpdaterState.Type
+
+export const UpdateSelection = Schema.Struct({ sha256: Schema.String, channel: Schema.Literals(["dev", "stable"]) })
+
+export type UpdateSelection = typeof UpdateSelection.Type
 
 /** The desktop app updater. Its state is app-wide; every window receives the same value. */
 export const Updater = Ipc.define({
@@ -21,8 +41,10 @@ export const Updater = Ipc.define({
   state: UpdaterState,
   methods: {
     check: { output: UpdaterState },
-    /** Restarts into a staged update, or opens the installer download. */
+    /** Upstream: restart/download. Lingxi: stage the last checked exact candidate for the next normal launch. */
     install: {},
+    /** Lingxi only: stage the exact offer displayed to the user, without restarting. */
+    stage: { input: UpdateSelection, output: UpdaterState },
   },
   events: {
     /** The app menu asks the focused window to check with in-app feedback (beta builds). */

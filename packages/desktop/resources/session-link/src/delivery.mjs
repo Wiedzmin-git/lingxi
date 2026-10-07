@@ -7,10 +7,10 @@ export const messageSchema = {
   properties: {
     targetSessionID: { type: "string", pattern: "^ses_[A-Za-z0-9_-]+$" },
     text: { type: "string", minLength: 1, maxLength: 48000 },
-    mode: { type: "string", enum: ["wake", "queue", "steer"] },
+    mode: { type: "string", enum: ["wake", "steer"], default: "wake", description: "wake: start idle work or wait if busy; steer: start idle work or enter at the next safe step boundary." },
     messageID: { type: "string", minLength: 1, maxLength: 128 },
   },
-  required: ["targetSessionID", "text", "mode"],
+  required: ["targetSessionID", "text"],
   additionalProperties: false,
 }
 
@@ -22,10 +22,11 @@ export function parseMessage(value) {
     throw new LinkError(400, "invalid_input", "Invalid target Session ID")
   if (typeof value.text !== "string" || !value.text.trim() || value.text.length > 48000)
     throw new LinkError(400, "invalid_input", "Message text must contain 1–48000 characters")
-  if (!["wake", "queue", "steer"].includes(value.mode)) throw new LinkError(400, "invalid_input", "Unknown delivery mode")
+  const mode = value.mode === undefined ? "wake" : value.mode
+  if (!["wake", "steer"].includes(mode)) throw new LinkError(400, "invalid_input", "Use wake for ordinary delivery or steer for current work; silent queue is no longer a sending mode")
   if (value.messageID !== undefined && (typeof value.messageID !== "string" || !value.messageID || value.messageID.length > 128))
     throw new LinkError(400, "invalid_input", "Invalid message ID")
-  return { ...value, messageID: value.messageID ?? randomUUID() }
+  return { ...value, mode, messageID: value.messageID ?? randomUUID() }
 }
 
 export async function deliver(api, policy, sender, message) {

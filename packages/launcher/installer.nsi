@@ -64,6 +64,9 @@ ownershipChecked:
   IfFileExists "$INSTDIR\Lingxi.Launcher.exe" launcherInstalled
   File "${PAYLOAD}\Lingxi.Launcher.exe"
 launcherInstalled:
+  IfFileExists "$INSTDIR\Lingxi.Start.exe" guiInstalled
+  File "${PAYLOAD}\Lingxi.Start.exe"
+guiInstalled:
   File "${PAYLOAD}\LICENSE.txt"
   File "${PAYLOAD}\DOTNET-LICENSE.txt"
   File "${PAYLOAD}\DOTNET-NOTICES.txt"
@@ -85,8 +88,10 @@ installed:
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   StrCmp $Portable "1" complete
   CreateDirectory "$SMPROGRAMS\Lingxi"
-  CreateShortcut "$SMPROGRAMS\Lingxi\Lingxi.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'launch "$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
-  CreateShortcut "$SMPROGRAMS\Lingxi\Stage updates.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'stage "$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
+   ; The immutable bundle carries the matching recovery-capable supervisor.
+   ; Existing running/root entrypoints remain untouched during staging.
+   CreateShortcut "$SMPROGRAMS\Lingxi\Lingxi.lnk" "$INSTDIR\installation\bundles\${BUNDLE_SHA256}\resources\lingxi-updater\Lingxi.Start.exe" '"$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
+   CreateShortcut "$SMPROGRAMS\Lingxi\Stage updates.lnk" "$INSTDIR\installation\bundles\${BUNDLE_SHA256}\resources\lingxi-updater\Lingxi.Launcher.exe" 'stage-interactive "$INSTDIR\installation"' "$INSTDIR\Lingxi.ico"
   CreateShortcut "$SMPROGRAMS\Lingxi\Release credential.lnk" "$INSTDIR\Lingxi.Launcher.exe" 'credential' "$INSTDIR\Lingxi.ico"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "DisplayName" "Lingxi · 靈犀"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingxi" "DisplayIcon" "$INSTDIR\Lingxi.ico"
@@ -98,10 +103,25 @@ complete:
 SectionEnd
 
 Section "Uninstall"
+   ; Hold the same installation launch lock through removal. This also covers
+   ; supervisors launched from immutable bundles, not just the root executable.
+   ClearErrors
+   FileOpen $2 "$INSTDIR\installation\launch.lock" a
+   IfErrors inUse
   ; A running supervising launcher cannot be removed. Fail before changing
   ; shortcuts or registration, leaving the active installation usable.
+  ; Probe the GUI supervisor before deleting either entrypoint. Opening for
+  ; append writes no bytes but fails while Windows maps this executable.
+  IfFileExists "$INSTDIR\Lingxi.Start.exe" 0 guiNotRunning
+  ClearErrors
+  FileOpen $0 "$INSTDIR\Lingxi.Start.exe" a
+  IfErrors inUse
+  FileClose $0
+guiNotRunning:
   ClearErrors
   Delete "$INSTDIR\Lingxi.Launcher.exe"
+  IfErrors inUse
+  Delete "$INSTDIR\Lingxi.Start.exe"
   IfErrors inUse
   ; Messages, descriptors, launch journals and immutable bundles remain in place.
   ; Remove global registration only if this is the recorded installation.
@@ -124,4 +144,5 @@ inUse:
   SetErrorLevel 1
   Abort "Lingxi launcher could not be removed. Close Lingxi before uninstalling; the installation was retained."
 uninstallComplete:
+   FileClose $2
 SectionEnd

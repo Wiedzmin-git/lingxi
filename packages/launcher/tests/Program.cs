@@ -4,6 +4,12 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Lingxi.Launcher;
 
+if (Environment.GetEnvironmentVariable("LINGXI_SERVICE_FIXTURE") == "1")
+{
+    await Task.Delay(60_000);
+    return 0;
+}
+
 if (Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") is not null)
 {
     var mode = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixture-mode.txt"));
@@ -60,6 +66,56 @@ try
         Throws(() => FreshProfile.Create(other, existing, "dev"));
         Check(File.ReadAllText(Path.Combine(existing, "history.db")) == "retained", "existing history retained");
         return Task.CompletedTask;
+    });
+    await Test("service recovery covers stale original, unregistered contender and uncertain spawn", async () =>
+    {
+        foreach (var mode in new[] { "stale-original", "unregistered", "uncertain" })
+        {
+            var store = new InstallationStore(Path.Combine(root, "service-" + mode));
+            var state = FreshProfile.Create(store, Path.Combine(root, "profile-" + mode), "dev");
+            var bundles = new BundleStore(store.Root);
+            var archive = Package("ready", []);
+            var slot = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
+            var attempt = new Attempt(Guid.NewGuid().ToString("N"), slot.Sha256, "starting", DateTimeOffset.UtcNow, Bundle: slot);
+            using var descriptor = JsonDocument.Parse(File.ReadAllBytes(state.Profile.BindingPath));
+            var registration = descriptor.RootElement.GetProperty("serviceRegistration").GetString()!;
+            var directory = Path.Combine(descriptor.RootElement.GetProperty("desktopUserData").GetString()!, "cli", slot.BackendVersion);
+            Directory.CreateDirectory(directory);
+            foreach (var file in Directory.GetFiles(AppContext.BaseDirectory)) File.Copy(file, Path.Combine(directory, Path.GetFileName(file)), true);
+            var executable = Path.Combine(directory, "opencode-cli.exe");
+            File.Copy(Environment.ProcessPath!, executable, true);
+            var startedAt = DateTimeOffset.UtcNow;
+            var start = new System.Diagnostics.ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
+            start.Environment["LINGXI_SERVICE_FIXTURE"] = "1";
+            using var child = System.Diagnostics.Process.Start(start)!;
+            try
+            {
+                if (mode != "unregistered") { child.Kill(); await child.WaitForExitAsync(); }
+                if (mode == "stale-original")
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(registration)!);
+                    File.WriteAllText(registration, JsonSerializer.Serialize(new { pid = child.Id, id = "original", version = slot.BackendVersion }));
+                }
+                var marker = ServiceUpgradeRecovery.Marker(store, attempt);
+                File.WriteAllText(marker, JsonSerializer.Serialize(new { attemptId = attempt.Id, profileDigest = state.Profile.BindingSha256,
+                    previousId = "original", previousPid = child.Id, startedAt, pendingSpawn = mode == "uncertain",
+                    contenders = mode == "unregistered" ? new[] { child.Id } : Array.Empty<int>() }));
+                if (mode == "uncertain")
+                {
+                    var refused = false;
+                    try { await ServiceUpgradeRecovery.Retire(store, state.Profile, attempt); }
+                    catch (InvalidOperationException) { refused = true; }
+                    Check(refused, "uncertain admission refuses automatic fallback");
+                    Check(File.Exists(marker), "uncertain admission retains recovery evidence");
+                    continue;
+                }
+                await ServiceUpgradeRecovery.Retire(store, state.Profile, attempt);
+                Check(!File.Exists(registration), "no stale or late registration remains");
+                Check(!File.Exists(marker), "completed recovery removes marker");
+                Check(child.HasExited, "unregistered contender cannot publish after recovery");
+            }
+            finally { if (!child.HasExited) { child.Kill(); await child.WaitForExitAsync(); } }
+        }
     });
     await Test("bundle admission hashes every inventoried file and rejects modified manifests", () =>
     {
@@ -224,7 +280,9 @@ try
         {
             await Until(() =>
             {
-                if (store.Read().Episode?.Phase != "ready") return false;
+                try { if (store.Read().Episode?.Phase != "ready") return false; }
+                catch (FileNotFoundException) { return false; }
+                catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { return false; }
                 // Atomic file replacement becomes visible before the writer's
                 // state lock is released. Inject only after acquiring that lock.
                 try { failureLock = store.Lock("state"); return true; }
@@ -286,6 +344,46 @@ try
         Check(File.ReadAllText(destination) == "preexisting-owner-file", "HTTP failure preserves an unowned file");
         await Reject(() => feed.Download(manifest, destination, "synthetic-fixture-credential", CancellationToken.None));
         Check(File.ReadAllText(destination) == "preexisting-owner-file", "CreateNew failure preserves an unowned file");
+    });
+    await Test("Desktop updates bind the active profile and attempt and preserve staged state without activation", async () =>
+    {
+        foreach (var channel in new[] { "dev", "stable" })
+        {
+            var (store, _, _) = Installation("desktop-updates-" + channel);
+            store.SelectChannel(channel);
+            var bundles = new BundleStore(store.Root);
+            var archive = Package("ready", []);
+            var current = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
+            var nextArchive = Package("ready", [current.Sha256]);
+            var next = bundles.Stage(nextArchive, Wire.Hash(nextArchive), new FileInfo(nextArchive).Length);
+            var attempt = new Attempt(Guid.NewGuid().ToString("N"), current.Sha256, "ready", DateTimeOffset.UtcNow);
+            store.Change(state => state with { Current = current, Candidate = next, Attempt = attempt });
+            var profile = store.Read().Profile;
+            var context = new DesktopUpdateContext(profile.Id, profile.BindingSha256, attempt.Id, current.Sha256);
+            var updates = new DesktopUpdates(store, bundles, context);
+            using var http = new HttpClient();
+            var feed = new PrivateDistribution(http);
+            var before = File.ReadAllBytes(Path.Combine(store.Root, "installation.json"));
+            Func<string> absentCredential = () => throw new InvalidOperationException("No credential available");
+            var offer = await updates.Check(feed, absentCredential, CancellationToken.None);
+            Check(offer.Status == "staged" && offer.Sha256 == next.Sha256 && offer.Channel == channel, "offline staged offer");
+            await updates.Stage(feed, absentCredential, next.Sha256, channel, CancellationToken.None);
+            Check(before.SequenceEqual(File.ReadAllBytes(Path.Combine(store.Root, "installation.json"))), "check and repeated staged action never activate or rewrite state");
+            await Reject(() => updates.Stage(feed, absentCredential, new string('b', 64), channel, CancellationToken.None));
+            await Reject(() => updates.Stage(feed, absentCredential, next.Sha256, channel == "dev" ? "stable" : "dev", CancellationToken.None));
+            foreach (var incompatible in new[] { next with { BackendVersion = "different" }, next with { StorageContract = new string('f', 64) } })
+            {
+                store.Change(state => state with { Candidate = incompatible });
+                await Reject(() => updates.Check(feed, absentCredential, CancellationToken.None));
+                await Reject(() => updates.Stage(feed, absentCredential, incompatible.Sha256, channel, CancellationToken.None));
+            }
+            store.Change(state => state with { Candidate = next });
+            foreach (var wrong in new[] { context with { ProfileId = "other" }, context with { BindingSha256 = new string('c', 64) },
+                context with { AttemptId = "other" }, context with { BundleSha256 = next.Sha256 } })
+                Throws(() => new DesktopUpdates(store, bundles, wrong).Bound());
+            store.Change(state => state with { Attempt = state.Attempt! with { Phase = "starting" } });
+            Throws(() => updates.Bound());
+        }
     });
     Console.WriteLine(JsonSerializer.Serialize(new { passed = passed.Count, tests = passed, root }, Wire.Json));
     return 0;

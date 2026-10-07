@@ -2,6 +2,8 @@ using System.Text;
 using System.Text.Json;
 using Lingxi.Launcher;
 
+var interactive = args.Length > 0 && args[0] == "stage-interactive";
+
 try
 {
     if (args.Length == 0) throw new ArgumentException("Usage: Lingxi.Launcher <status|initialize|initialize-new|channel|stage-local|stage|launch|credential> <installation-root> ...");
@@ -27,6 +29,26 @@ try
     var bundles = new BundleStore(installation.Root);
     switch (args[0])
     {
+        case "desktop-check" when args.Length == 2:
+        case "desktop-stage" when args.Length == 4:
+            using (var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(args[0] == "desktop-check" ? 1 : 15)))
+            using (var handler = new HttpClientHandler { AllowAutoRedirect = false })
+            using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
+            {
+                var context = new DesktopUpdateContext(
+                    Environment.GetEnvironmentVariable("LINGXI_PROFILE_ID") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_PROFILE_DIGEST") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_BUNDLE_DIGEST") ?? "");
+                var updates = new DesktopUpdates(installation, bundles, context);
+                updates.Bound();
+                var feed = new PrivateDistribution(client);
+                var result = args[0] == "desktop-check"
+                    ? await updates.Check(feed, WindowsCredential.Read, deadline.Token)
+                    : await updates.Stage(feed, WindowsCredential.Read, args[2], args[3], deadline.Token, Progress(true));
+                Console.WriteLine(JsonSerializer.Serialize(result, Wire.Json));
+            }
+            break;
         case "initialize-new" when args.Length == 4:
             FreshProfile.Create(installation, args[2], args[3]);
             break;
@@ -44,21 +66,36 @@ try
                 installation.SelectCandidate(bundles.Stage(args[2], args[3], long.Parse(args[4])));
             break;
         case "stage" when args.Length == 2:
+        case "stage-interactive" when args.Length == 2:
             using (installation.Lock("stage"))
             using (var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(15)))
             using (var handler = new HttpClientHandler { AllowAutoRedirect = false })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
             {
+                Console.WriteLine("Lingxi: checking the selected update channel...");
                 var feed = new PrivateDistribution(client);
                 var credential = WindowsCredential.Read();
-                var manifest = await feed.Channel(installation.Read().Channel, credential, deadline.Token);
+                var state = installation.Read();
+                Console.WriteLine("Channel: " + state.Channel + ". Connecting to GitHub...");
+                var manifest = await feed.Channel(state.Channel, credential, deadline.Token);
+                if (state.Current?.Sha256 == manifest.ArchiveSha256 || state.Candidate?.Sha256 == manifest.ArchiveSha256)
+                {
+                    Console.WriteLine(state.Current?.Sha256 == manifest.ArchiveSha256
+                        ? "Already up to date. No download needed."
+                        : "Update already downloaded. Close and open Lingxi when convenient.");
+                    break;
+                }
+                Console.WriteLine("Release: " + manifest.ReleaseId);
+                Console.WriteLine("Downloading " + (manifest.ArchiveBytes / 1048576.0).ToString("F1") + " MB. Keep this window open.");
                 var archive = Path.Combine(installation.Root, "downloads", Guid.NewGuid().ToString("N") + ".zip");
                 try
                 {
-                    await feed.Download(manifest, archive, credential, deadline.Token);
+                    await feed.Download(manifest, archive, credential, deadline.Token, Progress(false));
+                    Console.WriteLine("\nDownload complete. Verifying and unpacking files...");
                     var candidate = bundles.Stage(archive, manifest.ArchiveSha256, manifest.ArchiveBytes);
                     if (candidate.ReleaseId != manifest.ReleaseId) throw new InvalidDataException("Channel and bundle release identities differ");
                     installation.SelectCandidate(candidate);
+                    Console.WriteLine("READY. Update downloaded and verified. Close and open Lingxi when convenient to apply it.");
                 }
                 finally { if (File.Exists(archive)) File.Delete(archive); }
             }
@@ -68,11 +105,40 @@ try
             break;
         default: throw new ArgumentException("Unknown command or argument count");
     }
+    Pause();
     return 0;
 }
 catch (Exception error)
 {
     // URLs, response bodies, environment and credential values are deliberately absent.
     Console.Error.WriteLine(error is HttpRequestException http ? $"Private release request failed ({(int?)http.StatusCode})" : error.Message);
+    if (interactive) Console.Error.WriteLine("Update was not confirmed. Your current Desktop continues. Check your connection and saved release key, then try again.");
+    Pause();
     return 1;
+}
+
+void Pause()
+{
+    if (!interactive || Console.IsInputRedirected) return;
+    Console.WriteLine("Press Enter to close this window.");
+    Console.ReadLine();
+}
+
+Action<long, long> Progress(bool wire)
+{
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    var last = -1.0;
+    return (received, total) =>
+    {
+        var seconds = clock.Elapsed.TotalSeconds;
+        if (received != total && last >= 0 && seconds - last < 1) return;
+        last = seconds;
+        var percent = (int)(100 * received / total);
+        if (wire)
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { percent }, new JsonSerializerOptions(Wire.Json) { WriteIndented = false }));
+            return;
+        }
+        Console.Write($"\r{percent,3}%  {received / 1048576.0:F1}/{total / 1048576.0:F1} MB  {received / Math.Max(seconds, 0.001) / 1048576.0:F1} MB/s    ");
+    };
 }

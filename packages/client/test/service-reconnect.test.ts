@@ -18,6 +18,40 @@ const clients = [
 ]
 
 for (const client of clients) {
+  test(`${client.name} records contenders before registration can be accepted`, async () => {
+    await using fixture = await serviceFixture()
+    const events: Array<{ phase: string; pid?: number }> = []
+    const endpoint = await client.ensure({
+      file: fixture.registration,
+      version: "2.1.0-next.1",
+      command: fixture.command("compatible"),
+      onContender: (event) => {
+        events.push(event)
+        if (event.phase === "spawned" && event.pid) fixture.track(event.pid)
+      },
+    })
+    const registration = await Bun.file(fixture.registration).json()
+    expect(endpoint.url).toBe(registration.url)
+    expect(events[0]).toEqual({ phase: "starting" })
+    expect(events).toContainEqual({ phase: "spawned", pid: registration.pid })
+  })
+  test(`${client.name} rejects a changed generation before handoff or stop`, async () => {
+    await using fixture = await serviceFixture()
+    const owner = fixture.spawn("protocol")
+    await fixture.waitForFile()
+    const original = await Bun.file(fixture.registration).json()
+    await expect(
+      client.stop({
+        file: fixture.registration,
+        pty: "handoff",
+        expected: { ...original, id: "stale-generation" },
+      }),
+    ).rejects.toThrow("registration changed")
+    expect(owner.exitCode).toBe(null)
+    expect(await Bun.file(fixture.registration).json()).toEqual(original)
+    expect(await Bun.file(fixture.registration + ".handoff-request").exists()).toBe(false)
+    expect(await Bun.file(fixture.registration + ".signal").exists()).toBe(false)
+  })
   for (const policy of [
     { name: "no version requirement", version: undefined },
     { name: "matching exact version", version: "test" },
@@ -71,8 +105,9 @@ for (const client of clients) {
     const replacement = await Bun.file(fixture.registration).json()
     fixture.track(replacement.pid)
 
-    expect(await owner.exited).toBe(0)
-    expect(await Bun.file(fixture.registration + ".signal").text()).toBe("SIGTERM")
+    // Windows terminates the process without invoking its POSIX signal handler.
+    expect(await owner.exited).toBe(process.platform === "win32" ? 1 : 0)
+    if (process.platform !== "win32") expect(await Bun.file(fixture.registration + ".signal").text()).toBe("SIGTERM")
     expect(await Bun.file(fixture.registration + ".handoff-request").exists()).toBe(true)
     expect(starts).toEqual(["version-mismatch"])
     expect(replacement.pid).not.toBe(owner.pid)
@@ -87,8 +122,8 @@ for (const client of clients) {
     await Bun.write(fixture.registration + ".missing-health", "")
 
     await client.stop({ file: fixture.registration })
-    expect(await owner.exited).toBe(0)
-    expect(await Bun.file(fixture.registration + ".signal").text()).toBe("SIGTERM")
+    expect(await owner.exited).toBe(process.platform === "win32" ? 1 : 0)
+    if (process.platform !== "win32") expect(await Bun.file(fixture.registration + ".signal").text()).toBe("SIGTERM")
     expect(await Bun.file(fixture.registration).exists()).toBe(false)
   })
 }

@@ -48,33 +48,40 @@ export async function prepareDesktopLink(root, configContent) {
       // Earlier declarations may be legitimately superseded. The generation's
       // attestation below, not unanimity of source documents, owns the binding.
       const boundPackages = []
+      const upgradePackages = []
       for (const plugin of candidates) {
         if (typeof plugin.package !== "string") continue
         const candidate = plugin.package.startsWith("file:") ? fileURLToPath(plugin.package) : plugin.package
         if (!path.isAbsolute(candidate)) continue
         if (samePath(candidate, packagePath) || await sameRuntimePackage(candidate, packagePath)) {
           boundPackages.push(candidate)
+        } else if (sameInstallationPackage(candidate, packagePath)) {
+          upgradePackages.push(candidate)
         }
       }
       const unavailable = async (reason) => {
         await writeFile(path.join(root, "runtime.json"), JSON.stringify({ desktopPID: process.pid, server: url, pid: info.pid, version: info.version, status: "unavailable", reason, controls: "disabled" }, null, 2))
         return { status: "unavailable", reason }
       }
-      if (!boundPackages.length) return await unavailable("compatible-service-missing-session-link-binding")
+      if (!boundPackages.length && !upgradePackages.length) return await unavailable("compatible-service-missing-session-link-binding")
+      const acceptedPackages = [...boundPackages, ...upgradePackages]
       // Merely adopting a version-compatible service does not install a plugin.
       // Warm its ordinary location registry and verify the exact loaded carrier.
       await api.request("GET", "/api/agent")
       const deadline = Date.now() + 30000
       let active = false
+      let activePackage
       while (Date.now() < deadline) {
         const plugins = await api.request("GET", "/api/plugin")
-        active = plugins.some((plugin) => plugin.id === "session-link" && plugin.state.status === "active" && plugin.source.type === "local" && boundPackages.some((root) => samePath(plugin.source.path, path.join(root, "index.js"))))
+        activePackage = acceptedPackages.find((root) => plugins.some((plugin) => plugin.id === "session-link" && plugin.state.status === "active" && plugin.source.type === "local" && samePath(plugin.source.path, path.join(root, "index.js"))))
+        active = activePackage !== undefined
         if (active) break
         await setTimeout(100)
       }
       if (!active) return await unavailable("session-link-plugin-not-active")
       const binding = await readFile(bindingFile(policyFile, directory), "utf8").then((text) => JSON.parse(text), (error) => { if (error.code === "ENOENT") return undefined; throw error })
       if (!binding || binding.pid !== info.pid || !samePath(binding.directory, directory) || !samePath(binding.policyFile, policyFile) || !samePath(binding.connectionFile, connectionFile)) return await unavailable("session-link-active-binding-mismatch")
+      if (!boundPackages.includes(activePackage)) return await unavailable("session-link-runtime-upgrade-required")
       // Never trust an environment-supplied structural-control scope in Desktop.
       await writeFile(connectionFile, JSON.stringify({ url, password, directory }), { mode: 0o600 })
       const observer = startObserver(api)
@@ -112,6 +119,17 @@ export async function prepareDesktopLink(root, configContent) {
     },
     async close() { await running?.close(); running = undefined },
   }
+}
+
+function sameInstallationPackage(candidate, current) {
+  const installation = (value) => {
+    const root = path.resolve(value, "..", "..", "..")
+    const relative = path.relative(root, value).split(path.sep)
+    if (path.basename(root) !== "bundles" || relative.length !== 3 || !/^[a-f0-9]{64}$/.test(relative[0]) || relative[1] !== "resources" || relative[2] !== "session-link") return undefined
+    return process.platform === "win32" ? root.toLowerCase() : root
+  }
+  const root = installation(current)
+  return root !== undefined && root === installation(candidate)
 }
 
 // Digest-addressed GUI bundles have different paths while a compatible backend

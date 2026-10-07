@@ -28,13 +28,15 @@ public sealed class PrivateDistribution(HttpClient http)
         return manifest;
     }
 
-    public async Task Download(ChannelManifest manifest, string destination, string credential, CancellationToken cancellationToken)
+    public async Task Download(ChannelManifest manifest, string destination, string credential, CancellationToken cancellationToken,
+        Action<long, long>? progress = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var complete = false;
         var created = false;
         try
         {
+            progress?.Invoke(0, manifest.ArchiveBytes);
             using var response = await Asset(manifest.ArchiveAssetId, credential, cancellationToken);
             if (response.Content.Headers.ContentLength is { } bytes && bytes != manifest.ArchiveBytes)
                 throw new InvalidDataException("Asset size does not match channel manifest");
@@ -52,6 +54,7 @@ public sealed class PrivateDistribution(HttpClient http)
                 if (total > manifest.ArchiveBytes) throw new InvalidDataException("Asset exceeded admitted size");
                 hash.AppendData(buffer, 0, count);
                 await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                progress?.Invoke(total, manifest.ArchiveBytes);
             }
             if (total != manifest.ArchiveBytes || !Convert.ToHexStringLower(hash.GetHashAndReset()).Equals(manifest.ArchiveSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Downloaded asset failed digest verification");

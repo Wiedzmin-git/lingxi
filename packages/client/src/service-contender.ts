@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
+import type { EnsureOptions } from "./service"
 
 export type ServiceContender = {
   readonly child: ChildProcess
@@ -14,7 +15,9 @@ export function spawnServiceContender(
   command: string,
   args: ReadonlyArray<string>,
   env?: Readonly<Record<string, string | undefined>>,
+  observe?: EnsureOptions["onContender"],
 ): ServiceContender {
+  observe?.({ phase: "starting" })
   const child = spawn(command, args, {
     detached: true,
     windowsHide: true,
@@ -39,6 +42,12 @@ export function spawnServiceContender(
   child.once("close", () => {
     closed = true
   })
+  try {
+    observe?.({ phase: "spawned", pid: child.pid })
+  } catch (cause) {
+    child.kill()
+    throw cause
+  }
   child.unref()
   return {
     child,

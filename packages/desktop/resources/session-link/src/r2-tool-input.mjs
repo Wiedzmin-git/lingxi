@@ -16,7 +16,7 @@ export const sendSchema = {
       path: { type: "string", minLength: 1, maxLength: 4096 }, name: { type: "string", minLength: 1, maxLength: 255 },
       mime: { type: "string", minLength: 1, maxLength: 255 } }, required: ["path"], additionalProperties: false } },
   },
-  required: ["text", "mode"],
+  required: ["text"],
   oneOf: [{ required: ["targetSessionID"], not: { required: ["addressRef"] } }, { required: ["addressRef"], not: { required: ["targetSessionID"] } }],
 }
 
@@ -31,7 +31,7 @@ export function parseSend(value) {
     return parseMessage(value)
   }
   if (typeof value.addressRef !== "string" || !/^addr_[a-f0-9-]{36}$/.test(value.addressRef)) throw new LinkError(400, "invalid_contact", "Invalid local contact reference")
-  parseMessage({ targetSessionID: "ses_validation", text: value.text, mode: value.mode, ...(value.messageID !== undefined ? { messageID: value.messageID } : {}) })
+  const validated = parseMessage({ targetSessionID: "ses_validation", text: value.text, mode: value.mode, ...(value.messageID !== undefined ? { messageID: value.messageID } : {}) })
   const relation = value.inReplyTo
   if (relation !== undefined && (!relation || typeof relation !== "object" || Array.isArray(relation) || Object.keys(relation).some((key) => !["installationID", "sessionID", "messageID"].includes(key)) ||
     !/^ins_[a-f0-9-]{36}$/.test(relation.installationID) || !/^ses_[A-Za-z0-9_-]+$/.test(relation.sessionID) || typeof relation.messageID !== "string" || !relation.messageID || relation.messageID.length > 128))
@@ -44,7 +44,7 @@ export function parseSend(value) {
       throw new LinkError(400, "invalid_attachments", "Invalid attachment path or display metadata")
     return { path: file.path, ...(file.name ? { name: file.name } : {}), ...(file.mime ? { mime: file.mime } : {}) }
   })
-  return { addressRef: value.addressRef, text: value.text, mode: value.mode, messageID: value.messageID,
+  return { addressRef: value.addressRef, text: value.text, mode: validated.mode, messageID: value.messageID,
     ...(relation ? { inReplyTo: { installationID: relation.installationID, sessionID: relation.sessionID, messageID: relation.messageID } } : {}), attachments }
 }
 

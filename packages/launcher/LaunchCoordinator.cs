@@ -26,6 +26,8 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
         var fallbackAttempt = episode.Phase == "primary";
         if (episode.Phase == "fallback") throw Block("The admitted fallback was interrupted; recovery budget is exhausted");
         selected = fallbackAttempt ? Fallback(episode) : episode.Primary;
+        if (fallbackAttempt && state.Attempt is { } interrupted)
+            await ServiceUpgradeRecovery.Retire(installation, state.Profile, interrupted);
 
         Process process;
         try { process = await Start(selected, episode, fallbackAttempt, state.Profile, state.Channel, cancellationToken); }
@@ -105,13 +107,14 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             }
             admitted = attempt;
             var start = new ProcessStartInfo(Wire.Within(bundles.DirectoryFor(selected.Sha256), manifest.Entrypoint))
-            { UseShellExecute = false, WorkingDirectory = bundles.DirectoryFor(selected.Sha256) };
+            { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = bundles.DirectoryFor(selected.Sha256) };
             start.Environment["LINGXI_PROFILE_BINDING"] = profile.BindingPath;
             start.Environment["LINGXI_PROFILE_ID"] = profile.Id;
             start.Environment["LINGXI_PROFILE_DIGEST"] = profile.BindingSha256;
             start.Environment["LINGXI_LAUNCH_ATTEMPT"] = attempt.Id;
             start.Environment["LINGXI_BUNDLE_DIGEST"] = selected.Sha256;
             start.Environment["LINGXI_READINESS_PIPE"] = pipeName;
+            start.Environment["LINGXI_SERVICE_UPGRADE_RECOVERY"] = ServiceUpgradeRecovery.Marker(installation, attempt);
             process = Process.Start(start) ?? throw new IOException("Desktop did not start");
             installation.Change(value => value with { Attempt = attempt with { ProcessId = process.Id, ProcessStartedAt = process.StartTime.ToUniversalTime() } });
             var handshake = Readiness(pipe, process, deadline.Token);
@@ -142,6 +145,8 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
                 await acknowledgement.FlushAsync(deadline.Token);
             }
             installation.Change(value => value with { Attempt = value.Attempt! with { Phase = "ready" }, Episode = value.Episode! with { Phase = "ready" } });
+            var upgradeMarker = ServiceUpgradeRecovery.Marker(installation, attempt);
+            if (File.Exists(upgradeMarker)) File.Delete(upgradeMarker);
             return process;
         }
         catch (Exception error)
@@ -155,11 +160,14 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             }
             if (process is not null)
             {
-                // Retire only the exact Desktop we created; never its detached backend.
+                // Retire the exact Desktop we created. A detached backend is kept
+                // unless the explicit pre-readiness upgrade journal establishes it
+                // as this attempt's replacement generation.
                 // A failure to establish its exit escapes as an ownership failure, not permission to fallback.
                 if (!process.HasExited) process.Kill(false);
                 await process.WaitForExitAsync(CancellationToken.None);
             }
+            await ServiceUpgradeRecovery.Retire(installation, profile, admitted);
             if (admitted is not null)
                 installation.Change(value => value.Attempt?.Id == admitted.Id
                     ? value with { Attempt = value.Attempt with { Phase = "failed" } } : value);

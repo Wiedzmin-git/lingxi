@@ -1,7 +1,7 @@
 # Lingxi launcher (Windows, development slice)
 
-Independent .NET 10 launch and recovery coordinator. It does not replace the
-OpenCode server or migrate a working profile. Native packaged Desktop readiness,
+Independent .NET 10 launch and recovery coordinator. It does not migrate a working
+profile or change backend versions. Native packaged Desktop readiness,
 same-profile branded transition and an explicitly compatible failed-candidate
 fallback have passed isolated acceptance. The NSIS bootstrap has separate
 installation/staging/uninstall acceptance; see the release evidence for its status.
@@ -12,6 +12,7 @@ installation/staging/uninstall acceptance; see the release evidence for its stat
 dotnet build -c Release
 dotnet run --project tests/Lingxi.Launcher.Tests.csproj -c Release
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish gui/Lingxi.Start.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
 Tests create isolated profiles, actual child processes and a loopback TLS server.
@@ -24,6 +25,11 @@ It uses the app package's existing Vite/Playwright toolchain and actual DesktopA
 components with fixture providers; it does not replace native Desktop acceptance.
 
 ## Commands
+
+Desktop shortcuts run `Lingxi.Start.exe <installation-root>`. This Windows GUI
+entrypoint calls the same coordinator, owns its lifetime locks, and reports errors
+in a native dialog. It has no console, and Desktop creation suppresses a child
+console. `Lingxi.Launcher.exe` remains the console entrypoint for the commands below.
 
 ```text
 initialize <installation-root> <binding.json> <profile-id> <dev|stable>
@@ -48,8 +54,9 @@ without mutation. A channel change does not activate or restart anything.
 `initialize-new` is for an empty, new profile only. It refuses occupied directories
 and never adopts existing history. NSIS uses this on first install and only stages
 the supplied bundle on subsequent installs; it does not start Desktop. An existing
-launcher is retained for manual replacement. The temporary installer helper can
-stage while the installed launcher supervises a running Desktop.
+root launcher is retained. Shortcuts select the matching supervisor inside the
+new immutable bundle. The temporary installer helper can stage while the installed
+launcher supervises a running Desktop. Uninstall holds the installation launch lock.
 
 Normal setup refuses a different directory when another Lingxi installation owns
 the registered shortcuts. `/PORTABLE /D=<directory>` (with `/D` last) installs without
@@ -67,14 +74,14 @@ Equal inputs have been checked to produce identical archive bytes.
 
 Compile `installer.nsi` with NSIS Unicode using `/INPUTCHARSET UTF8`, defines
 `PAYLOAD`, `BUNDLE_SHA256`, `BUNDLE_BYTES`, and `OUTPUT`. The payload contains the
-self-contained `Lingxi.Launcher.exe`, `desktop.zip`, upstream `LICENSE.txt`,
+self-contained `Lingxi.Launcher.exe` and `Lingxi.Start.exe`, `desktop.zip`, upstream `LICENSE.txt`,
 runtime `DOTNET-LICENSE.txt` / `DOTNET-NOTICES.txt`, and `INSTALL.txt` as `README.txt`.
 Desktop's Electron notices and upstream license travel inside its bundle.
 
 `credential` accepts a token only through hidden interactive console entry and
 stores it as a Windows generic credential. Private distribution is fixed to
 `Wiedzmin-git/lingxi-releases`: tags `lingxi-channel-dev` / `lingxi-channel-stable`,
-asset `channel.json`. Those channel releases are not yet published.
+asset `channel.json`. The dev channel is published; stable is not yet promoted.
 
 ## Admission and recovery
 
@@ -94,8 +101,16 @@ asset `channel.json`. Those channel releases are not yet published.
 - A failed startup may launch one explicitly allowed fallback with equal storage
   contract digest and backend version. Its budget is journaled before creation.
   Crash recovery cannot reconstruct a new budget from adjacent slots.
-- Cleanup only retires the exact unready child. The detached shared backend is
-  not killed. No profile snapshot is restored over newer history.
+- Ordinary cleanup retires only the exact unready Desktop. A Session Link runtime
+  upgrade may restart an observed-idle, attested backend of this installation using
+  identical backend bytes. It requires the new recovery-capable supervisor; older
+  supervisors refuse that transition before stopping the old service.
+- Such an upgrade journals the old registration and every replacement contender
+  before readiness. Failed startup retires recorded replacement processes, including
+  those not yet registered, before launching fallback. Unknown process admission
+  blocks recovery rather than guessing. No profile snapshot replaces newer history.
+- The idle check is an observation, not an atomic input barrier. Later-arriving work
+  may be interrupted and recovered; tool effects are not guaranteed exactly-once.
 - A starting attempt without recorded PID has **unknown process ownership**.
   Automatic recovery blocks; it does not scan processes or assume no child exists.
   Confirmed creation failure or exact-child termination is recorded separately.

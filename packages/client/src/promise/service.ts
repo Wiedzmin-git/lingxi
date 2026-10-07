@@ -50,7 +50,12 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
     const [command, ...args] = options.command ?? ["opencode", "serve", "--service"]
     if (command === undefined) throw new Error("Missing service command")
     try {
-      return spawnServiceContender(command, args, await PtyHandoff.environment(options.file ?? fallback(), options.env))
+      return spawnServiceContender(
+        command,
+        args,
+        await PtyHandoff.environment(options.file ?? fallback(), options.env),
+        options.onContender,
+      )
     } catch (cause) {
       throw new Error("Failed to start server", { cause })
     }
@@ -152,6 +157,8 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
 /** Stop the registered local service. */
 export async function stop(options: StopOptions = {}) {
   const info = await read(options.file)
+  if (options.expected && (!info || !same(info, options.expected)))
+    throw new Error("Service registration changed before the requested stop")
   // Terminal handoff is best-effort; it must never keep the old service running.
   await (
     options.pty === "handoff" && info !== undefined

@@ -72,7 +72,7 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
     const env = yield* Effect.tryPromise(() => PtyHandoff.environment(options.file ?? fallback(), options.env))
     return yield* Effect.try({
       try: () => {
-        return spawnServiceContender(command, args, env)
+        return spawnServiceContender(command, args, env, options.onContender)
       },
       catch: (cause) => new Error("Failed to start server", { cause }),
     })
@@ -180,6 +180,8 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
 /** Stop the registered local service. */
 export const stop = Effect.fn("service.stop")(function* (options: StopOptions = {}) {
   const info = yield* read(options.file)
+  if (options.expected && (!info || !same(info, options.expected)))
+    return yield* Effect.fail(new Error("Service registration changed before the requested stop"))
   // Terminal handoff is best-effort; it must never keep the old service running.
   yield* Effect.tryPromise(() =>
     options.pty === "handoff" && info !== undefined

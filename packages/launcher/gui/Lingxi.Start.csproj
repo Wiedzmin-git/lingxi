@@ -1,15 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <AssemblyName>Lingxi.Launcher</AssemblyName>
-    <Version>0.1.0</Version>
+    <AssemblyName>Lingxi.Start</AssemblyName>
+    <ApplicationIcon>../../desktop/icons/lingxi/icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="tests/**/*.cs" />
-    <Compile Remove="gui/**/*.cs" />
+    <ProjectReference Include="../Lingxi.Launcher.csproj" />
   </ItemGroup>
 </Project>
