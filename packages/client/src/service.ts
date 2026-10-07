@@ -26,6 +26,8 @@ export type EnsureReason = "missing" | "version-mismatch"
 
 /** Options used to ensure the local OpenCode service is running. */
 export type EnsureOptions = DiscoverOptions & {
+  /** Preserve an existing registered process instead of replacing it on mismatch or failed probes. Defaults to `replace`. */
+  readonly existingService?: "replace" | "preserve"
   /** Service command and arguments. Defaults to `opencode serve --service`. */
   readonly command?: ReadonlyArray<string>
   /** Environment variables added to the inherited service process environment. */

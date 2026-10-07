@@ -11,6 +11,7 @@ import {
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
 import { matchesVersion } from "../service-version.js"
 import { PtyHandoff } from "../pty-handoff.js"
+import { readPreservedRegistration } from "../service-registration.js"
 
 export * from "../service.js"
 /** Contents of the local service registration file. */
@@ -77,9 +78,16 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
     })
   })
   const found = yield* Effect.gen(function* () {
-    const registration = yield* registered(options.file, timing.requestTimeout)
+    const registration = yield* registered(options.file, timing.requestTimeout, options.existingService === "preserve")
     const info = registration.info
     const service = registration.service
+    if (options.existingService === "preserve" && info !== undefined && service === undefined) {
+      if (![...contenders].some((item) => item.child.pid === info.pid))
+        return yield* Effect.fail(
+          new Error("Registered background service is unavailable; preservation policy forbids replacement"),
+        )
+      return Option.none<LocalService>()
+    }
     if (registration.timedOut && info !== undefined) {
       timeouts = {
         info,
@@ -118,6 +126,10 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       if (compatible && service.state === "failed")
         return yield* Effect.fail(new Error("Background service failed to start"))
       if (compatible) return Option.none<LocalService>()
+      if (options.existingService === "preserve")
+        return yield* Effect.fail(
+          new Error("Background service version mismatch; preservation policy forbids replacement"),
+        )
       yield* announce("version-mismatch", service.version)
       if (service.state !== "ready")
         yield* Effect.logWarning("Background service is not ready; replacement cannot preserve persistent terminals")
@@ -281,8 +293,10 @@ const probeResult = Effect.fnUntraced(function* (info: Info, timeout = defaultEn
   return { service: undefined, timedOut: false }
 })
 
-const registered = Effect.fnUntraced(function* (file?: string, timeout?: number) {
-  const info = yield* read(file)
+const registered = Effect.fnUntraced(function* (file?: string, timeout?: number, preserve = false) {
+  const info = preserve
+    ? yield* Effect.tryPromise(() => readPreservedRegistration(file ?? fallback()))
+    : yield* read(file)
   if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
   return { info, ...(yield* probeResult(info, timeout)) }
 })

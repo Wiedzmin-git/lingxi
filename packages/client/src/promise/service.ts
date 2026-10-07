@@ -11,6 +11,7 @@ import {
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
 import { matchesVersion } from "../service-version.js"
 import { PtyHandoff } from "../pty-handoff.js"
+import { readPreservedRegistration } from "../service-registration.js"
 
 export * from "../service.js"
 
@@ -58,7 +59,17 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   try {
     while (true) {
       if (Date.now() >= deadline) throw failure ?? new Error("Timed out waiting for the background service to start")
-      const registration = await registered(options.file, timing.requestTimeout)
+      const registration = await registered(options.file, timing.requestTimeout, options.existingService === "preserve")
+      if (
+        options.existingService === "preserve" &&
+        registration.info !== undefined &&
+        registration.service === undefined
+      ) {
+        if (![...contenders].some((item) => item.child.pid === registration.info?.pid))
+          throw new Error("Registered background service is unavailable; preservation policy forbids replacement")
+        await delay(timing.pollInterval)
+        continue
+      }
       if (registration.timedOut && registration.info !== undefined) {
         timeouts = {
           info: registration.info,
@@ -96,6 +107,8 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
         }
         if (compatible && service.state === "failed") throw new Error("Background service failed to start")
         if (!compatible) {
+          if (options.existingService === "preserve")
+            throw new Error("Background service version mismatch; preservation policy forbids replacement")
           announce("version-mismatch", service.version)
           if (service.state !== "ready")
             console.warn("Background service is not ready; replacement cannot preserve persistent terminals")
@@ -237,8 +250,8 @@ function decodeInfo(input: unknown) {
   return { version: input.version, pid: input.pid }
 }
 
-async function registered(file?: string, timeout?: number) {
-  const info = await read(file)
+async function registered(file?: string, timeout?: number, preserve = false) {
+  const info = preserve ? await readPreservedRegistration(file ?? fallback()) : await read(file)
   if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
   return { info, ...(await probeResult(info, timeout)) }
 }

@@ -3,7 +3,6 @@ import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { BackgroundServiceState } from "./background-service-state"
 import { cleanStages, DesktopCli } from "./desktop-cli"
 import { SidecarCredentials } from "./sidecar-credentials"
-import { sidecarProbe } from "./sidecar-probe"
 import { connectSessionLink, prepareSessionLink } from "./session-link"
 
 export * as BackgroundService from "./background-service"
@@ -36,11 +35,12 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
   const isolated = !app.isPackaged && process.env.OPENCODE_DESKTOP_ISOLATED_SERVER === "1"
   const cli = yield* desktopCli.resolve
   const linkEnvironment = yield* prepareSessionLink()
-  const version = mode === "initial" ? cli.version : undefined
+  const version = cli.version
   if (isolated) process.env.XDG_STATE_HOME = app.getPath("userData")
   const client = yield* Effect.promise(() => import("@opencode/client/service"))
   const ensure = () =>
     client.Service.ensure({
+      existingService: "preserve",
       file:
         isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
           ? path.join(app.getPath("userData"), "opencode", "service-local.json")
@@ -58,9 +58,10 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
       onStart: (reason, previousVersion) =>
         runFork(Effect.logInfo("v2 CLI background service starting", { reason, previousVersion })),
     })
-  // A compatible service the entry module already found is adopted at once; ensure() still runs
+  // A service with the required version is adopted at once; ensure() still runs
   // afterwards for its side effects (terminal handoff completion), off the renderer's path.
-  const early = mode === "initial" && !isolated ? yield* Effect.promise(sidecarProbe) : undefined
+  const early =
+    mode === "initial" && !isolated ? yield* Effect.promise(() => client.Service.discover({ version })) : undefined
   if (early) yield* Effect.sync(() => void ensure().catch(() => undefined))
   const service = early ?? (yield* Effect.tryPromise(ensure))
   if (service.auth?.type !== "basic") throw new Error("V2 CLI background service did not provide authentication")
