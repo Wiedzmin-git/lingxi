@@ -1,0 +1,59 @@
+Lingxi · 靈犀 — development distribution
+
+Source: https://github.com/Wiedzmin-git/lingxi
+Private releases: https://github.com/Wiedzmin-git/lingxi-releases
+Based on OpenCode. Upstream MIT copyright and dependency notices are retained.
+The name draws on Li Shangyin's 心有靈犀一點通. The original is a love poem;
+the human–AI interpretation here is our modern development of that image.
+
+FIRST INSTALL
+The installer creates a NEW profile under its installation directory. It does
+not locate or migrate an existing OpenCode profile. No Desktop is launched by
+installation. Open Lingxi from the Start menu when you want to start work.
+
+Use /PORTABLE with a custom /D= directory to install without Start-menu or
+uninstall-registry entries. The /D= argument must be last. The chosen directory
+contains private profile data and must remain writable by its Windows user.
+
+UPDATES
+The first launcher is installed by NSIS. Launcher replacement remains manual.
+For later Desktop bundles, the "Stage updates" shortcut downloads and verifies
+the configured channel while Desktop can remain open. Activation occurs only
+on the next launch after closing Desktop. Dev and stable share one profile.
+Do not launch the bundle's Lingxi.exe directly: use the launcher shortcut.
+To change channel: Lingxi.Launcher channel "<installation-directory>\installation" stable
+(or dev), then stage. Changing channel retains the current Desktop and profile;
+it clears a pending candidate from the other channel, not the recovery budget.
+
+PRIVATE ACCESS
+Each colleague receives a separate read-only release credential from the owner.
+For this personally owned repository, Wiedzmin-git creates separate fine-grained
+tokens with only lingxi-releases selected and Contents: Read-only (Metadata is
+automatically read-only). Token names identify the individual recipient for
+separate expiry/revocation; API activity still uses the issuing owner's identity.
+These credentials do not require granting colleagues write access to the repo.
+Do not substitute a broad write-enabled token or assume an outside collaborator
+can create an equivalent fine-grained token under their own account.
+Use "Release credential" to enter the token into a hidden console prompt.
+It is saved in Windows Credential Manager, not in the profile, command line,
+renderer, logs or release files. Never paste a token into a conversation.
+The installed credential is Windows-user scoped for this one repository.
+
+EXISTING PROFILES
+Adoption requires an explicit descriptor matching the original physical paths
+and an intentionally selected installation root. See docs/lingxi-profile-binding.md
+in the source repository. Do not move/copy a working history into this installer
+or point two independent installations at the same Desktop profile.
+
+UNINSTALL
+Uninstall removes launcher and shortcuts. It retains the profile, conversation
+history, drafts, installation journal and bundles. It does not remove the Windows
+Credential Manager entry. Remove a release credential explicitly through Windows
+Credential Manager when access is no longer wanted.
+
+RECOVERY
+A launch failure permits only one explicitly release-tested compatible fallback.
+No older database is restored over newer messages. A missing PID after interrupted
+process creation is an unknown ownership state and blocks automatic recovery.
+After a startup error, keep installation.json and its .previous file for diagnosis.
+Do not delete them to clear a blocked state or reset the fallback budget.

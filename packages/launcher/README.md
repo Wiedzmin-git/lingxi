@@ -1,8 +1,10 @@
 # Lingxi launcher (Windows, development slice)
 
 Independent .NET 10 launch and recovery coordinator. It does not replace the
-OpenCode server or migrate a working profile. Native Desktop acceptance and the
-first launcher installer are still pending.
+OpenCode server or migrate a working profile. Native packaged Desktop readiness,
+same-profile branded transition and an explicitly compatible failed-candidate
+fallback have passed isolated acceptance. The NSIS bootstrap has separate
+installation/staging/uninstall acceptance; see the release evidence for its status.
 
 ## Build and contract verification
 
@@ -25,7 +27,9 @@ components with fixture providers; it does not replace native Desktop acceptance
 
 ```text
 initialize <installation-root> <binding.json> <profile-id> <dev|stable>
+initialize-new <installation-root> <empty-new-profile-directory> <dev|stable>
 status <installation-root>
+channel <installation-root> <dev|stable>
 stage-local <installation-root> <bundle.zip> <sha256> <bytes>
 credential
 stage <installation-root>
@@ -36,6 +40,36 @@ Use fully qualified paths. The binding follows `docs/lingxi-profile-binding.md`.
 Initialization pins its exact bytes and records one installation owner under
 `desktopUserData/lingxi-launcher`. Another installation cannot independently claim
 the same Desktop profile. Dev/stable are channels of that installation.
+`channel` preserves profile identity, current Desktop and the recovery budget. A
+different-channel staged candidate is cleared; run `stage` to select the new
+channel's bundle. A concurrent staging operation makes the channel change fail
+without mutation. A channel change does not activate or restart anything.
+
+`initialize-new` is for an empty, new profile only. It refuses occupied directories
+and never adopts existing history. NSIS uses this on first install and only stages
+the supplied bundle on subsequent installs; it does not start Desktop. An existing
+launcher is retained for manual replacement. The temporary installer helper can
+stage while the installed launcher supervises a running Desktop.
+
+Normal setup refuses a different directory when another Lingxi installation owns
+the registered shortcuts. `/PORTABLE /D=<directory>` (with `/D` last) installs without
+global shortcuts/uninstall registration. Uninstall retains profile data, bundles,
+bindings and journals. See `INSTALL.txt` for the recipient instructions.
+
+## Bundle and installer authoring
+
+Use `scripts/New-LingxiBundle.ps1` on the unpacked output of the Desktop's
+`electron-builder.lingxi.config.ts` configuration. Supply an explicit release ID,
+exact backend version, evidence-grounded storage contract and only tested fallback
+digests. The writer rejects links, inventories each file, normalizes ZIP paths,
+uses ordinal ordering and fixed entry timestamps, and refuses existing outputs.
+Equal inputs have been checked to produce identical archive bytes.
+
+Compile `installer.nsi` with NSIS Unicode using `/INPUTCHARSET UTF8`, defines
+`PAYLOAD`, `BUNDLE_SHA256`, `BUNDLE_BYTES`, and `OUTPUT`. The payload contains the
+self-contained `Lingxi.Launcher.exe`, `desktop.zip`, upstream `LICENSE.txt`,
+runtime `DOTNET-LICENSE.txt` / `DOTNET-NOTICES.txt`, and `INSTALL.txt` as `README.txt`.
+Desktop's Electron notices and upstream license travel inside its bundle.
 
 `credential` accepts a token only through hidden interactive console entry and
 stores it as a Windows generic credential. Private distribution is fixed to
@@ -50,6 +84,10 @@ asset `channel.json`. Those channel releases are not yet published.
 - Staging only selects a candidate. Launch uses explicit pinned profile identity,
   bundle digest and attempt identity. Readiness is an authenticated Windows pipe
   exchange with the exact child PID and matching profile/attempt/backend values.
+- Primary activation of different bytes requires an equal declared storage contract
+  and exact backend version. Cross-version migrations are not supported by this
+  initial launcher. Selection/admission serializes with staging/channel changes;
+  failure before admission cannot authorize automatic fallback.
 - Readiness requires durable Desktop storage, renderer hydration, backend health
   and Session Link binding. Acceptance is committed before ACK. ACK uncertainty
   cannot authorize killing a possibly interactive Desktop or startup fallback.

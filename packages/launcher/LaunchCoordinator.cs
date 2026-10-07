@@ -28,11 +28,11 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
         selected = fallbackAttempt ? Fallback(episode) : episode.Primary;
 
         Process process;
-        try { process = await Start(selected, episode, fallbackAttempt, state.Profile, cancellationToken); }
+        try { process = await Start(selected, episode, fallbackAttempt, state.Profile, state.Channel, cancellationToken); }
         catch (StartupFailure) when (!fallbackAttempt)
         {
             selected = Fallback(episode);
-            try { process = await Start(selected, episode, true, state.Profile, cancellationToken); }
+            try { process = await Start(selected, episode, true, state.Profile, state.Channel, cancellationToken); }
             catch (StartupFailure) { throw Block("Candidate and compatible fallback did not become ready"); }
         }
         catch (StartupFailure) { throw Block("The compatible fallback did not become ready"); }
@@ -67,7 +67,7 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
     }
 
     private async Task<Process> Start(Slot selected, RecoveryEpisode episode, bool fallback,
-        ProfileSelection profile, CancellationToken cancellationToken)
+        ProfileSelection profile, string channel, CancellationToken cancellationToken)
     {
         Process? process = null;
         var accepted = false;
@@ -76,20 +76,33 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
         deadline.CancelAfter(TimeSpan.FromSeconds(90));
         try
         {
-            bundles.Verify(selected);
-            InstallationStore.VerifyProfile(profile);
-            var manifest = bundles.Manifest(selected.Sha256);
             var attempt = new Attempt(Guid.NewGuid().ToString("N"), selected.Sha256, "starting", DateTimeOffset.UtcNow, Bundle: selected);
             var pipeName = "lingxi-ready-" + Guid.NewGuid().ToString("N");
             using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            // Budget admission and the attempted bundle belong to one atomic transition.
-            installation.Change(value => value with
+            BundleManifest manifest;
+            // Stage/channel changes serialize only with startup admission, never
+            // with the lifetime of an already running Desktop.
+            using (installation.Lock("stage"))
             {
-                Attempt = attempt,
-                Episode = episode with { Phase = fallback ? "fallback" : "primary" },
-                Candidate = fallback && value.Candidate?.Sha256 == episode.Primary.Sha256 ? null : value.Candidate
-            });
+                var current = installation.Read();
+                if (!fallback && episode.Phase == "new" &&
+                    (current.Channel != channel || (current.Candidate ?? current.Current)?.Sha256 != selected.Sha256))
+                    throw new SelectionRejected("Launch selection changed before admission; launch again using the selected channel");
+                if (!fallback && current.Current is { } previous && previous.Sha256 != selected.Sha256 &&
+                    (!previous.StorageContract.Equals(selected.StorageContract, StringComparison.OrdinalIgnoreCase) || previous.BackendVersion != selected.BackendVersion))
+                    throw new SelectionRejected("This release changes the storage or backend contract; automatic activation is not supported");
+                bundles.Verify(selected);
+                InstallationStore.VerifyProfile(profile);
+                manifest = bundles.Manifest(selected.Sha256);
+                // Budget admission and the attempted bundle belong to one atomic transition.
+                installation.Change(value => value with
+                {
+                    Attempt = attempt,
+                    Episode = episode with { Phase = fallback ? "fallback" : "primary" },
+                    Candidate = fallback && value.Candidate?.Sha256 == episode.Primary.Sha256 ? null : value.Candidate
+                });
+            }
             admitted = attempt;
             var start = new ProcessStartInfo(Wire.Within(bundles.DirectoryFor(selected.Sha256), manifest.Entrypoint))
             { UseShellExecute = false, WorkingDirectory = bundles.DirectoryFor(selected.Sha256) };
@@ -133,6 +146,8 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
         }
         catch (Exception error)
         {
+            if (error is SelectionRejected) throw;
+            if (admitted is null) throw new InvalidOperationException("Launch selection could not be admitted; no process was started", error);
             if (accepted)
             {
                 process?.Dispose();
@@ -188,6 +203,7 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
     }
 
     private sealed class StartupFailure(Exception cause) : Exception("Desktop startup failed", cause);
+    private sealed class SelectionRejected(string message) : InvalidOperationException(message);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -6,6 +6,8 @@ import { DesktopPaths } from "../paths"
 import { getUserShell, loadShellEnv } from "../service/shell-env"
 import { registerRendererProtocol, setDockIcon, setProtocolReporter } from "../windows"
 import { scoped } from "../native/logging"
+import { LINGXI } from "../constants"
+import { profileBinding } from "@opencode/util/profile-binding"
 
 // electron-context-menu attaches to every existing and future window, so it can load once the first
 // window is up instead of holding up startup with its dependency tree.
@@ -37,8 +39,10 @@ export const prepareDesktop = Effect.gen(function* () {
   const path = yield* Path.Path
   const paths = yield* DesktopPaths.resolve
   if (
+    !LINGXI &&
+    !profileBinding &&
     !process.env.OPENCODE_DESKTOP_PROFILE_ROOT &&
-    (app.isPackaged || process.env.OPENCODE_DESKTOP_DISABLE_PROTOCOL_REGISTRATION !== "1")
+    process.env.OPENCODE_DESKTOP_DISABLE_PROTOCOL_REGISTRATION !== "1"
   )
     app.setAsDefaultProtocolClient("opencode")
   const runFork = Effect.runForkWith(yield* Effect.context())

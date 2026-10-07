@@ -59,6 +59,13 @@ public sealed class InstallationStore
         value.Blocked is not null && value.Episode?.Primary.Sha256 == candidate.Sha256 ? value :
         value with { Candidate = candidate, Blocked = null, Episode = value.Blocked is null ? value.Episode : null });
 
+    public Installation SelectChannel(string channel)
+    {
+        if (channel is not ("dev" or "stable")) throw new ArgumentException("Unknown channel");
+        using var staging = Lock("stage");
+        return Change(value => value.Channel == channel ? value : value with { Channel = channel, Candidate = null });
+    }
+
     public FileStream LockProfile(ProfileSelection profile)
     {
         Directory.CreateDirectory(profile.OwnershipDirectory);

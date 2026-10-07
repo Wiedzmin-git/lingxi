@@ -26,6 +26,11 @@ if (Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") is not null)
         var line = await acknowledgement.ReadLineAsync();
         if (line is null || !JsonDocument.Parse(line).RootElement.GetProperty("accepted").GetBoolean()) return 24;
     }
+    if (mode == "ready-controlled-exit")
+    {
+        var limit = DateTime.UtcNow.AddSeconds(15);
+        while (!File.Exists(binding + ".exit") && DateTime.UtcNow < limit) await Task.Delay(10);
+    }
     await Task.Delay(400);
     return mode == "ready-crash" ? 31 : 0;
 }
@@ -35,6 +40,27 @@ Directory.CreateDirectory(root);
 var passed = new List<string>();
 try
 {
+    await Test("fresh profile initialization never adopts existing history or replaces a binding", () =>
+    {
+        var store = new InstallationStore(Path.Combine(root, "fresh-installation"));
+        var profile = Path.Combine(root, "fresh-profile");
+        var selected = FreshProfile.Create(store, profile, "dev");
+        var bytes = File.ReadAllBytes(selected.Profile.BindingPath);
+        using var descriptor = JsonDocument.Parse(bytes);
+        Check(descriptor.RootElement.GetProperty("id").GetString() == selected.Profile.Id, "exact new identity");
+        Check(descriptor.RootElement.GetProperty("desktopUserData").GetString() == Path.Combine(profile, "desktop"), "isolated Desktop root");
+        Check(descriptor.RootElement.GetProperty("servicePort").GetInt32() > 0, "explicit loopback port");
+        Throws(() => FreshProfile.Create(store, profile, "stable"));
+        Check(bytes.SequenceEqual(File.ReadAllBytes(selected.Profile.BindingPath)), "binding bytes retained");
+        var other = new InstallationStore(Path.Combine(root, "other-fresh-installation"));
+        Throws(() => FreshProfile.Create(other, profile, "dev"));
+        var existing = Path.Combine(root, "existing-history");
+        Directory.CreateDirectory(existing);
+        File.WriteAllText(Path.Combine(existing, "history.db"), "retained");
+        Throws(() => FreshProfile.Create(other, existing, "dev"));
+        Check(File.ReadAllText(Path.Combine(existing, "history.db")) == "retained", "existing history retained");
+        return Task.CompletedTask;
+    });
     await Test("bundle admission hashes every inventoried file and rejects modified manifests", () =>
     {
         var (store, _, _) = Installation("bundle");
@@ -50,6 +76,24 @@ try
         Throws(() => bundles.Verify(slot));
         return Task.CompletedTask;
     });
+    await Test("channel selection preserves the bound profile and recovery budget, clearing only a different-channel candidate", () =>
+    {
+        var (store, binding, _) = Installation("channel");
+        var bundles = new BundleStore(store.Root);
+        var archive = Package("ready", []);
+        var slot = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
+        var before = store.Change(value => value with { Current = slot, Candidate = slot,
+            Episode = new RecoveryEpisode("retained-episode", slot, slot, "fallback"),
+            Attempt = new Attempt("retained-attempt", slot.Sha256, "starting", DateTimeOffset.UtcNow), Blocked = "retained-block" });
+        var bytes = File.ReadAllBytes(binding);
+        Check(JsonSerializer.Serialize(store.SelectChannel("dev"), Wire.Json) == JsonSerializer.Serialize(before, Wire.Json), "same-channel selection retains staged candidate");
+        Check(JsonSerializer.Serialize(store.SelectChannel("stable"), Wire.Json) == JsonSerializer.Serialize(before with { Channel = "stable", Candidate = null }, Wire.Json), "only channel and old candidate change");
+        Check(bytes.SequenceEqual(File.ReadAllBytes(binding)), "same exact descriptor");
+        Throws(() => store.SelectChannel("beta"));
+        using (store.Lock("stage")) Throws(() => store.SelectChannel("dev"));
+        Check(JsonSerializer.Serialize(store.Read(), Wire.Json) == JsonSerializer.Serialize(before with { Channel = "stable", Candidate = null }, Wire.Json), "invalid or overlapping switch preserves state");
+        return Task.CompletedTask;
+    });
     await Test("traversal and wrong archive digest never become candidates", () =>
     {
         var (store, _, _) = Installation("traversal");
@@ -62,6 +106,28 @@ try
         Throws(() => bundles.Stage(archive, new string('0', 64), new FileInfo(archive).Length));
         Check(store.Read().Candidate is null, "candidate unchanged");
         return Task.CompletedTask;
+    });
+    await Test("primary activation rejects a different storage/backend contract and busy selection without fallback", async () =>
+    {
+        var (store, binding, _) = Installation("primary-compatibility");
+        var bundles = new BundleStore(store.Root);
+        var archive = Package("ready", []);
+        var good = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
+        store.SelectCandidate(good);
+        await new LaunchCoordinator(store, bundles).Launch(CancellationToken.None);
+        foreach (var contract in new[] { (Storage: new string('b', 64), Backend: "fixture-backend-v1"), (Storage: new string('a', 64), Backend: "fixture-backend-v2") })
+        {
+            var changed = Package("ready", [good.Sha256], storage: contract.Storage, backend: contract.Backend);
+            var candidate = bundles.Stage(changed, Wire.Hash(changed), new FileInfo(changed).Length);
+            store.SelectCandidate(candidate);
+            var before = JsonSerializer.Serialize(store.Read(), Wire.Json);
+            await Reject(() => new LaunchCoordinator(store, bundles).Launch(CancellationToken.None));
+            Check(JsonSerializer.Serialize(store.Read(), Wire.Json) == before, "incompatible selection never admitted");
+            Check(File.ReadAllText(binding + ".history") == "ready\n", "no incompatible child or fallback");
+        }
+        store.SelectCandidate(good);
+        using (store.Lock("stage")) await Reject(() => new LaunchCoordinator(store, bundles).Launch(CancellationToken.None));
+        Check(File.ReadAllText(binding + ".history") == "ready\n" && store.Read().Blocked is null, "busy selection does not authorize recovery");
     });
     await Test("real readiness commits exact profile and bundle; launcher retains profile lock", async () =>
     {
@@ -149,14 +215,30 @@ try
     {
         var (store, binding, _) = Installation("cleanup-failure");
         var bundles = new BundleStore(store.Root);
-        var archive = Package("ready", []);
+        var archive = Package("ready-controlled-exit", []);
         var slot = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
         store.SelectCandidate(slot);
         var launch = new LaunchCoordinator(store, bundles).Launch(CancellationToken.None);
-        await Until(() => store.Read().Episode?.Phase == "ready");
-        using (store.Lock("state")) await Reject(async () => await launch);
+        FileStream? failureLock = null;
+        try
+        {
+            await Until(() =>
+            {
+                if (store.Read().Episode?.Phase != "ready") return false;
+                // Atomic file replacement becomes visible before the writer's
+                // state lock is released. Inject only after acquiring that lock.
+                try { failureLock = store.Lock("state"); return true; }
+                catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { return false; }
+            });
+            using (failureLock)
+            {
+                File.WriteAllText(binding + ".exit", "exit");
+                await Reject(async () => await launch);
+            }
+        }
+        finally { File.WriteAllText(binding + ".exit", "exit"); }
         Check(store.Read().Current?.Sha256 == slot.Sha256 && store.Read().Blocked is null, "accepted release retained");
-        Check(File.ReadAllText(binding + ".history") == "ready\n", "no cleanup-triggered restart");
+        Check(File.ReadAllText(binding + ".history") == "ready-controlled-exit\n", "no cleanup-triggered restart");
     });
     await Test("confirmed process creation failure does not permanently poison a corrected candidate", async () =>
     {
@@ -208,7 +290,11 @@ try
     Console.WriteLine(JsonSerializer.Serialize(new { passed = passed.Count, tests = passed, root }, Wire.Json));
     return 0;
 }
-finally { Directory.Delete(root, true); }
+finally
+{
+    try { Directory.Delete(root, true); }
+    catch (IOException) { Console.Error.WriteLine("Fixture cleanup incomplete; retained at " + root); }
+}
 
 async Task Test(string name, Func<Task> action)
 {
@@ -229,7 +315,7 @@ async Task Test(string name, Func<Task> action)
     return (store, binding, id);
 }
 
-string Package(string mode, string[] fallbacks, bool invalidExecutable = false, string? storage = null)
+string Package(string mode, string[] fallbacks, bool invalidExecutable = false, string? storage = null, string backend = "fixture-backend-v1")
 {
     var content = Path.Combine(root, "bundle-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(content);
@@ -240,7 +326,7 @@ string Package(string mode, string[] fallbacks, bool invalidExecutable = false, 
     File.WriteAllText(Path.Combine(content, "fixture-mode.txt"), mode);
     if (invalidExecutable) File.WriteAllText(Path.Combine(content, "broken.exe"), "not an executable");
     var manifest = new BundleManifest(1, "fixture-" + Guid.NewGuid().ToString("N"), invalidExecutable ? "broken.exe" : "Lingxi.Launcher.Tests.exe",
-        storage ?? new string('a', 64), "fixture-backend-v1", fallbacks,
+        storage ?? new string('a', 64), backend, fallbacks,
         Directory.GetFiles(content).Select(file => new BundleFile(Path.GetFileName(file), new FileInfo(file).Length, Wire.Hash(file))).ToArray());
     File.WriteAllText(Path.Combine(content, "bundle.json"), JsonSerializer.Serialize(manifest, Wire.Json));
     var archive = content + ".zip";

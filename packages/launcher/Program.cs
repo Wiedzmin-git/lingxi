@@ -4,7 +4,7 @@ using Lingxi.Launcher;
 
 try
 {
-    if (args.Length == 0) throw new ArgumentException("Usage: Lingxi.Launcher <status|initialize|stage-local|stage|launch|credential> <installation-root> ...");
+    if (args.Length == 0) throw new ArgumentException("Usage: Lingxi.Launcher <status|initialize|initialize-new|channel|stage-local|stage|launch|credential> <installation-root> ...");
     if (args[0] == "credential")
     {
         if (args.Length != 1 || Console.IsInputRedirected) throw new ArgumentException("Credential entry requires an interactive console; never pass a token as an argument");
@@ -27,11 +27,17 @@ try
     var bundles = new BundleStore(installation.Root);
     switch (args[0])
     {
+        case "initialize-new" when args.Length == 4:
+            FreshProfile.Create(installation, args[2], args[3]);
+            break;
         case "initialize" when args.Length == 5:
             installation.Initialize(args[2], args[3], args[4]);
             break;
         case "status" when args.Length == 2:
             Console.WriteLine(JsonSerializer.Serialize(installation.Read(), Wire.Json));
+            break;
+        case "channel" when args.Length == 3:
+            installation.SelectChannel(args[2]);
             break;
         case "stage-local" when args.Length == 5:
             using (installation.Lock("stage"))
