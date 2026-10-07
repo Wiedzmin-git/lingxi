@@ -236,6 +236,12 @@ function locale(value: string) {
 const normalizeScript = (script?: string) => (script === "Aran" ? "Arab" : script)
 
 export const DESKTOP_NATIVE_ENGLISH = {
+  "desktop.backendUpdate.admissionMismatch": "Backend transition does not match the admitted launch",
+  "desktop.backendUpdate.registrationChanged": "Backend registration changed after transition admission",
+  "desktop.backendUpdate.previousMismatch": "Previous backend does not match the tested transition",
+  "desktop.backendUpdate.unavailable": "The previous backend did not confirm its state",
+  "desktop.backendUpdate.idleUnknown": "Could not verify service idleness for backend update",
+  "desktop.backendUpdate.busy": "Backend update is waiting for active sessions to finish",
   "desktop.menu.app": "Lingxi · 靈犀",
   "desktop.menu.file": "File",
   "desktop.menu.edit": "Edit",

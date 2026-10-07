@@ -22,7 +22,7 @@ public static class ServiceUpgradeRecovery
         using var descriptor = JsonDocument.Parse(File.ReadAllBytes(profile.BindingPath));
         var registration = descriptor.RootElement.GetProperty("serviceRegistration").GetString()!;
         var expected = Path.Combine(descriptor.RootElement.GetProperty("desktopUserData").GetString()!,
-            "cli", attempt.Bundle!.BackendVersion, "opencode-cli.exe");
+            "cli", BackendTransition.CacheVersion(attempt.Bundle!.BackendVersion), "opencode-cli.exe");
         var contenders = note.GetProperty("contenders").EnumerateArray().Select(value => value.GetInt32()).ToArray();
         foreach (var pid in contenders)
         {
@@ -49,8 +49,9 @@ public static class ServiceUpgradeRecovery
         var current = document.RootElement;
         // Preserve the original only if it still exists. stop() can be interrupted
         // between its process exit and removal of the old registration.
-        if (current.GetProperty("pid").GetInt32() == note.GetProperty("previousPid").GetInt32()
-            && (current.TryGetProperty("id", out var identity) ? identity.GetString() : null) == note.GetProperty("previousId").GetString())
+        var originalRegistration = current.GetProperty("pid").GetInt32() == note.GetProperty("previousPid").GetInt32()
+            && (current.TryGetProperty("id", out var identity) ? identity.GetString() : null) == note.GetProperty("previousId").GetString();
+        if (originalRegistration)
         {
             try
             {
@@ -61,7 +62,9 @@ public static class ServiceUpgradeRecovery
         }
         else if (!contenders.Contains(current.GetProperty("pid").GetInt32()))
             throw new InvalidOperationException("Registration belongs to an unrecorded service; recovery was stopped");
-        if (current.GetProperty("version").GetString() != attempt.Bundle!.BackendVersion)
+        var expectedVersion = originalRegistration && note.TryGetProperty("previousVersion", out var previousVersion)
+            ? previousVersion.GetString() : attempt.Bundle!.BackendVersion;
+        if (current.GetProperty("version").GetString() != expectedVersion)
             throw new InvalidDataException("Replacement service version does not match the attempted bundle");
         if (File.Exists(registration))
         {

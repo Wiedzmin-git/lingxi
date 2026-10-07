@@ -11,6 +11,7 @@ import { createMenu, sendMenuCommand } from "../native/menu"
 import { setNativeTranslations } from "../native/translations"
 import { IpcPortHandoff } from "../ipc-transport"
 import { ApplicationLifecycle } from "../lifecycle"
+import { launcherReadinessAccepted } from "../lifecycle/launcher-readiness"
 import { finishFirstLaunchOnboarding, isFirstLaunchOnboardingPending } from "../lifecycle/onboarding"
 import { BackgroundService } from "../service/background-service"
 import { DesktopCli } from "../service/desktop-cli"
@@ -29,7 +30,13 @@ export const appHandlers = AppRpcs.toLayer(
     const runFork = Effect.runForkWith(yield* Effect.context())
     return AppRpcs.of({
       AppAwaitInitialization: () => background.connection.pipe(Effect.map(SidecarCredentials.ready)),
-      AppReconnectService: () => background.reconnect.pipe(Effect.map(SidecarCredentials.ready)),
+      // Before launcher acceptance, startup owns the only service-generation path.
+      // A renderer retry observes that attempt instead of spawning outside its journal.
+      AppReconnectService: () =>
+        (process.env.LINGXI_READINESS_PIPE && !launcherReadinessAccepted()
+          ? background.connection
+          : background.reconnect
+        ).pipe(Effect.map(SidecarCredentials.ready)),
       AppConsumeInitialDeepLinks: () => Effect.sync(lifecycle.consumeInitialDeepLinks),
       AppGetDefaultServerUrl: () => Effect.sync(getDefaultServerUrl),
       AppSetDefaultServerUrl: ({ url }) => Effect.sync(() => setDefaultServerUrl(url)),

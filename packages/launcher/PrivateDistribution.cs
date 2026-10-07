@@ -5,14 +5,15 @@ using System.Text.Json;
 
 namespace Lingxi.Launcher;
 
-public sealed class PrivateDistribution(HttpClient http)
+public sealed class PrivateDistribution(HttpClient http, string channelPrefix = "lingxi-channel-")
 {
     private const string Repository = "https://api.github.com/repos/Wiedzmin-git/lingxi-releases";
 
     public async Task<ChannelManifest> Channel(string channel, string credential, CancellationToken cancellationToken)
     {
         if (channel is not ("dev" or "stable")) throw new ArgumentException("Unknown channel");
-        using var request = Request(new Uri(Repository + "/releases/tags/lingxi-channel-" + channel), credential, false);
+        if (channelPrefix is not ("lingxi-channel-" or "lingxi-runtime-")) throw new ArgumentException("Unknown feed capability");
+        using var request = Request(new Uri(Repository + "/releases/tags/" + channelPrefix + channel), credential, false);
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var release = JsonDocument.Parse(await Bounded(response.Content, 1_048_576, cancellationToken));

@@ -41,8 +41,15 @@ try
                     Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") ?? "",
                     Environment.GetEnvironmentVariable("LINGXI_BUNDLE_DIGEST") ?? "");
                 var updates = new DesktopUpdates(installation, bundles, context);
-                updates.Bound();
-                var feed = new PrivateDistribution(client);
+                var bound = updates.Bound();
+                SupervisorBootstrap.Prepare(installation, bundles, bound);
+                if (!SupervisorBootstrap.Current(installation, bound))
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new DesktopUpdateOffer("staged", bound.Channel,
+                        bound.Current!.ReleaseId, bound.Current.Sha256), Wire.Json));
+                    break;
+                }
+                var feed = new PrivateDistribution(client, "lingxi-runtime-");
                 var result = args[0] == "desktop-check"
                     ? await updates.Check(feed, WindowsCredential.Read, deadline.Token)
                     : await updates.Stage(feed, WindowsCredential.Read, args[2], args[3], deadline.Token, Progress(true));
@@ -67,15 +74,31 @@ try
             break;
         case "stage" when args.Length == 2:
         case "stage-interactive" when args.Length == 2:
+            // A retained shortcut may enter through an older accepted bundle.
+            // Delegate before taking the stage lock so the current helper owns it.
+            if (installation.Read().Current is { } accepted)
+            {
+                bundles.Verify(accepted);
+                var helper = Path.Combine(bundles.DirectoryFor(accepted.Sha256), "resources", "lingxi-updater", "Lingxi.Launcher.exe");
+                if (Wire.Hash(helper) != Wire.Hash(Environment.ProcessPath!))
+                {
+                    var start = new System.Diagnostics.ProcessStartInfo(helper) { UseShellExecute = false };
+                    foreach (var argument in args) start.ArgumentList.Add(argument);
+                    using var delegated = System.Diagnostics.Process.Start(start) ?? throw new IOException("Current update helper did not start");
+                    await delegated.WaitForExitAsync();
+                    return delegated.ExitCode;
+                }
+            }
             using (installation.Lock("stage"))
             using (var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(15)))
             using (var handler = new HttpClientHandler { AllowAutoRedirect = false })
             using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
             {
                 Console.WriteLine("Lingxi: checking the selected update channel...");
-                var feed = new PrivateDistribution(client);
+                var feed = new PrivateDistribution(client, "lingxi-runtime-");
                 var credential = WindowsCredential.Read();
                 var state = installation.Read();
+                if (state.Current is not null) SupervisorBootstrap.Prepare(installation, bundles, state);
                 Console.WriteLine("Channel: " + state.Channel + ". Connecting to GitHub...");
                 var manifest = await feed.Channel(state.Channel, credential, deadline.Token);
                 if (state.Current?.Sha256 == manifest.ArchiveSha256 || state.Candidate?.Sha256 == manifest.ArchiveSha256)
@@ -94,6 +117,8 @@ try
                     Console.WriteLine("\nDownload complete. Verifying and unpacking files...");
                     var candidate = bundles.Stage(archive, manifest.ArchiveSha256, manifest.ArchiveBytes);
                     if (candidate.ReleaseId != manifest.ReleaseId) throw new InvalidDataException("Channel and bundle release identities differ");
+                    if (state.Current is { } current && !BackendTransition.Compatible(current, candidate, bundles))
+                        throw new InvalidOperationException("This update requires a separate compatibility transition");
                     installation.SelectCandidate(candidate);
                     Console.WriteLine("READY. Update downloaded and verified. Close and open Lingxi when convenient to apply it.");
                 }

@@ -69,9 +69,9 @@ public sealed class DesktopUpdates(InstallationStore installation, BundleStore b
         finally { if (File.Exists(archive)) File.Delete(archive); }
     }
 
-    private static void Compatible(Installation state, Slot candidate)
+    private void Compatible(Installation state, Slot candidate)
     {
-        if (candidate.StorageContract != state.Current!.StorageContract || candidate.BackendVersion != state.Current.BackendVersion)
+        if (!BackendTransition.Compatible(state.Current!, candidate, bundles))
             throw new InvalidOperationException("This update requires a separate compatibility transition");
     }
 }

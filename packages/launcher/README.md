@@ -1,7 +1,7 @@
 # Lingxi launcher (Windows, development slice)
 
-Independent .NET 10 launch and recovery coordinator. It does not migrate a working
-profile or change backend versions. Native packaged Desktop readiness,
+Independent .NET 10 launch and recovery coordinator. It preserves the selected
+profile and admits explicitly tested backend-version pairs. Native packaged Desktop readiness,
 same-profile branded transition and an explicitly compatible failed-candidate
 fallback have passed isolated acceptance. The NSIS bootstrap has separate
 installation/staging/uninstall acceptance; see the release evidence for its status.
@@ -80,8 +80,10 @@ Desktop's Electron notices and upstream license travel inside its bundle.
 
 `credential` accepts a token only through hidden interactive console entry and
 stores it as a Windows generic credential. Private distribution is fixed to
-`Wiedzmin-git/lingxi-releases`: tags `lingxi-channel-dev` / `lingxi-channel-stable`,
-asset `channel.json`. The dev channel is published; stable is not yet promoted.
+`Wiedzmin-git/lingxi-releases`, asset `channel.json`. Legacy helpers use tags
+`lingxi-channel-dev` / `lingxi-channel-stable`, retained for the same-backend bridge.
+Supervisor-capable helpers use `lingxi-runtime-dev` / `lingxi-runtime-stable`.
+Stable is not yet promoted. See `docs/lingxi-backend-updates.md` for bootstrap admission.
 
 ## Admission and recovery
 
@@ -92,16 +94,19 @@ asset `channel.json`. The dev channel is published; stable is not yet promoted.
   bundle digest and attempt identity. Readiness is an authenticated Windows pipe
   exchange with the exact child PID and matching profile/attempt/backend values.
 - Primary activation of different bytes requires an equal declared storage contract
-  and exact backend version. Cross-version migrations are not supported by this
-  initial launcher. Selection/admission serializes with staging/channel changes;
+   and either the exact backend version or an inventoried exact-pair transition
+   contract plus the candidate's allowed fallback digest. Selection/admission serializes with staging/channel changes;
   failure before admission cannot authorize automatic fallback.
 - Readiness requires durable Desktop storage, renderer hydration, backend health
   and Session Link binding. Acceptance is committed before ACK. ACK uncertainty
   cannot authorize killing a possibly interactive Desktop or startup fallback.
 - A failed startup may launch one explicitly allowed fallback with equal storage
-  contract digest and backend version. Its budget is journaled before creation.
+   contract digest and a tested backend pair. Its budget is journaled before creation.
   Crash recovery cannot reconstruct a new budget from adjacent slots.
-- Ordinary cleanup retires only the exact unready Desktop. A Session Link runtime
+- Ordinary cleanup retires only the exact unready Desktop. A backend-version update
+  uses a separately attested transition plan and observed-idle replacement after
+  Desktop has closed. The original and selected executable caches are checked;
+  fallback verifies its own exact bundle bytes. A Session Link runtime
   upgrade may restart an observed-idle, attested backend of this installation using
   identical backend bytes. It requires the new recovery-capable supervisor; older
   supervisors refuse that transition before stopping the old service.

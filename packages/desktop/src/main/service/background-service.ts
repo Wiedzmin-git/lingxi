@@ -8,6 +8,7 @@ import { profileBinding } from "@opencode/util/profile-binding"
 import { Schema } from "effect"
 import { writeFileSync, renameSync } from "node:fs"
 import type { EnsureOptions } from "@opencode/client/service"
+import { prepareBackendTransition } from "./backend-transition"
 
 export * as BackgroundService from "./background-service"
 
@@ -44,10 +45,11 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
 
   if (isolated) process.env.XDG_STATE_HOME = app.getPath("userData")
   const client = yield* Effect.promise(() => import("@opencode/client/service"))
+  const transition = mode === "initial" ? yield* Effect.tryPromise(() => prepareBackendTransition(version)) : undefined
 
   const ensure = (onContender?: EnsureOptions["onContender"]) =>
     client.Service.ensure({
-      onContender,
+      onContender: onContender ?? transition,
       existingService: "preserve",
       file:
         profileBinding?.serviceRegistration ??

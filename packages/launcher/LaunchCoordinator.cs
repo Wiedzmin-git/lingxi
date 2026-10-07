@@ -62,7 +62,7 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
         var fallback = episode.Fallback;
         if (fallback is null || fallback.Sha256 == candidate.Sha256
             || !fallback.StorageContract.Equals(candidate.StorageContract, StringComparison.OrdinalIgnoreCase)
-            || fallback.BackendVersion != candidate.BackendVersion
+            || !BackendTransition.Compatible(fallback, candidate, bundles)
             || !candidate.AllowedFallbacks.Contains(fallback.Sha256, StringComparer.OrdinalIgnoreCase))
             throw Block("Failed startup has no tested-compatible fallback");
         return fallback;
@@ -92,7 +92,7 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
                     (current.Channel != channel || (current.Candidate ?? current.Current)?.Sha256 != selected.Sha256))
                     throw new SelectionRejected("Launch selection changed before admission; launch again using the selected channel");
                 if (!fallback && current.Current is { } previous && previous.Sha256 != selected.Sha256 &&
-                    (!previous.StorageContract.Equals(selected.StorageContract, StringComparison.OrdinalIgnoreCase) || previous.BackendVersion != selected.BackendVersion))
+                    !BackendTransition.Compatible(previous, selected, bundles))
                     throw new SelectionRejected("This release changes the storage or backend contract; automatic activation is not supported");
                 bundles.Verify(selected);
                 InstallationStore.VerifyProfile(profile);
@@ -106,6 +106,10 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
                 });
             }
             admitted = attempt;
+            SupervisorBootstrap.Record(installation, attempt, profile);
+            var previousBundle = installation.Read().Current;
+            var transition = BackendTransition.Prepare(installation, bundles, profile, attempt, previousBundle, fallback ? episode.Primary : null);
+            BackendTransition.VerifyCache(profile, selected, bundles);
             var start = new ProcessStartInfo(Wire.Within(bundles.DirectoryFor(selected.Sha256), manifest.Entrypoint))
             { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = bundles.DirectoryFor(selected.Sha256) };
             start.Environment["LINGXI_PROFILE_BINDING"] = profile.BindingPath;
@@ -115,6 +119,8 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             start.Environment["LINGXI_BUNDLE_DIGEST"] = selected.Sha256;
             start.Environment["LINGXI_READINESS_PIPE"] = pipeName;
             start.Environment["LINGXI_SERVICE_UPGRADE_RECOVERY"] = ServiceUpgradeRecovery.Marker(installation, attempt);
+            start.Environment.Remove("LINGXI_BACKEND_TRANSITION");
+            if (transition is not null) start.Environment["LINGXI_BACKEND_TRANSITION"] = transition;
             process = Process.Start(start) ?? throw new IOException("Desktop did not start");
             installation.Change(value => value with { Attempt = attempt with { ProcessId = process.Id, ProcessStartedAt = process.StartTime.ToUniversalTime() } });
             var handshake = Readiness(pipe, process, deadline.Token);

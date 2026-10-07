@@ -15,13 +15,19 @@ if (Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") is not null)
     var mode = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixture-mode.txt"));
     if (mode == "exit") return 23;
     var binding = Environment.GetEnvironmentVariable("LINGXI_PROFILE_BINDING")!;
+    if (File.Exists(binding + ".fail-next"))
+    {
+        File.Delete(binding + ".fail-next");
+        mode = "wrong-profile";
+    }
     File.AppendAllText(binding + ".history", mode + "\n");
     using var pipe = new NamedPipeClientStream(".", Environment.GetEnvironmentVariable("LINGXI_READINESS_PIPE")!, PipeDirection.InOut, PipeOptions.Asynchronous);
     await pipe.ConnectAsync(10_000);
     var message = new Readiness(1, Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT")!,
         Environment.GetEnvironmentVariable("LINGXI_BUNDLE_DIGEST")!,
         mode == "wrong-profile" ? Guid.NewGuid().ToString() : Environment.GetEnvironmentVariable("LINGXI_PROFILE_ID")!,
-        Environment.GetEnvironmentVariable("LINGXI_PROFILE_DIGEST")!, Environment.ProcessId, "fixture-backend-v1",
+        Environment.GetEnvironmentVariable("LINGXI_PROFILE_DIGEST")!, Environment.ProcessId,
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixture-backend.txt")),
         true, mode != "unready", true, true);
     await using var writer = new StreamWriter(pipe, new System.Text.UTF8Encoding(false), 1024, true);
     await writer.WriteLineAsync(JsonSerializer.Serialize(message, new JsonSerializerOptions(Wire.Json) { WriteIndented = false }));
@@ -46,6 +52,40 @@ Directory.CreateDirectory(root);
 var passed = new List<string>();
 try
 {
+    await Test("supervisor bootstrap redirects only installation-owned shortcuts and is idempotent", () =>
+    {
+        var (store, _, _) = Installation("bootstrap");
+        var oldTarget = Path.Combine(store.Root, "bundles", new string('a', 64), "resources", "lingxi-updater", "Lingxi.Start.exe");
+        var target = Path.Combine(store.Root, "bundles", new string('b', 64), "resources", "lingxi-updater", "Lingxi.Start.exe");
+        var arguments = "\"" + store.Root + "\"";
+        foreach (var mode in new[] { "owned", "foreign-root", "custom-target" })
+        {
+            var shortcut = Path.Combine(store.Root, mode + ".lnk");
+            SupervisorBootstrap.Redirect(shortcut, mode == "custom-target" ? Environment.ProcessPath! : oldTarget,
+                mode == "foreign-root" ? "\"another-root\"" : arguments, store.Root, true);
+            var before = Wire.Hash(shortcut);
+            var changed = SupervisorBootstrap.Redirect(shortcut, target, arguments, store.Root, false);
+            Check(changed == (mode == "owned"), "only the owned startup route changes");
+            Check((Wire.Hash(shortcut) != before) == changed, "foreign shortcut bytes retained");
+            var after = Wire.Hash(shortcut);
+            Check(SupervisorBootstrap.Redirect(shortcut, target, arguments, store.Root, false) == changed, "repeat has same outcome");
+            Check(Wire.Hash(shortcut) == after, "repeat does not rewrite the shortcut");
+        }
+        Check(Directory.GetFiles(Path.Combine(store.Root, "bootstrap"), "*.lnk").Length == 1, "one prior owned shortcut retained");
+        return Task.CompletedTask;
+    });
+    await Test("installed supervisor bytes alone do not authorize runtime-feed admission", () =>
+    {
+        var (store, _, _) = Installation("supervisor-capability");
+        var attempt = new Attempt(Guid.NewGuid().ToString("N"), new string('a', 64), "ready", DateTimeOffset.UtcNow);
+        var state = store.Change(value => value with { Attempt = attempt });
+        Check(!SupervisorBootstrap.Current(store, state), "legacy supervisor has no capability receipt");
+        SupervisorBootstrap.Record(store, attempt, state.Profile);
+        Check(SupervisorBootstrap.Current(store, state), "exact live supervisor generation is recognized");
+        Check(!SupervisorBootstrap.Current(store, state with { Attempt = attempt with { Sha256 = new string('b', 64) } }), "another bundle is not admitted");
+        Check(!SupervisorBootstrap.Current(store, state with { Profile = state.Profile with { BindingSha256 = new string('b', 64) } }), "another profile is not admitted");
+        return Task.CompletedTask;
+    });
     await Test("fresh profile initialization never adopts existing history or replaces a binding", () =>
     {
         var store = new InstallationStore(Path.Combine(root, "fresh-installation"));
@@ -69,17 +109,18 @@ try
     });
     await Test("service recovery covers stale original, unregistered contender and uncertain spawn", async () =>
     {
-        foreach (var mode in new[] { "stale-original", "unregistered", "uncertain" })
+        foreach (var mode in new[] { "stale-original", "stale-previous-version", "unregistered", "unregistered-metadata", "uncertain" })
         {
             var store = new InstallationStore(Path.Combine(root, "service-" + mode));
             var state = FreshProfile.Create(store, Path.Combine(root, "profile-" + mode), "dev");
             var bundles = new BundleStore(store.Root);
-            var archive = Package("ready", []);
+            var archive = Package("ready", [], backend: mode == "unregistered-metadata" ? "fixture+metadata" : "fixture-backend-v1");
             var slot = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
             var attempt = new Attempt(Guid.NewGuid().ToString("N"), slot.Sha256, "starting", DateTimeOffset.UtcNow, Bundle: slot);
             using var descriptor = JsonDocument.Parse(File.ReadAllBytes(state.Profile.BindingPath));
             var registration = descriptor.RootElement.GetProperty("serviceRegistration").GetString()!;
-            var directory = Path.Combine(descriptor.RootElement.GetProperty("desktopUserData").GetString()!, "cli", slot.BackendVersion);
+            var directory = Path.Combine(descriptor.RootElement.GetProperty("desktopUserData").GetString()!, "cli",
+                mode == "unregistered-metadata" ? "fixture-metadata" : slot.BackendVersion);
             Directory.CreateDirectory(directory);
             foreach (var file in Directory.GetFiles(AppContext.BaseDirectory)) File.Copy(file, Path.Combine(directory, Path.GetFileName(file)), true);
             var executable = Path.Combine(directory, "opencode-cli.exe");
@@ -90,16 +131,17 @@ try
             using var child = System.Diagnostics.Process.Start(start)!;
             try
             {
-                if (mode != "unregistered") { child.Kill(); await child.WaitForExitAsync(); }
-                if (mode == "stale-original")
+                if (!mode.StartsWith("unregistered", StringComparison.Ordinal)) { child.Kill(); await child.WaitForExitAsync(); }
+                var previousVersion = mode == "stale-previous-version" ? "fixture-backend-v0" : slot.BackendVersion;
+                if (mode is "stale-original" or "stale-previous-version")
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(registration)!);
-                    File.WriteAllText(registration, JsonSerializer.Serialize(new { pid = child.Id, id = "original", version = slot.BackendVersion }));
+                    File.WriteAllText(registration, JsonSerializer.Serialize(new { pid = child.Id, id = "original", version = previousVersion }));
                 }
                 var marker = ServiceUpgradeRecovery.Marker(store, attempt);
                 File.WriteAllText(marker, JsonSerializer.Serialize(new { attemptId = attempt.Id, profileDigest = state.Profile.BindingSha256,
-                    previousId = "original", previousPid = child.Id, startedAt, pendingSpawn = mode == "uncertain",
-                    contenders = mode == "unregistered" ? new[] { child.Id } : Array.Empty<int>() }));
+                    previousId = "original", previousPid = child.Id, previousVersion, startedAt, pendingSpawn = mode == "uncertain",
+                    contenders = mode.StartsWith("unregistered", StringComparison.Ordinal) ? new[] { child.Id } : Array.Empty<int>() }));
                 if (mode == "uncertain")
                 {
                     var refused = false;
@@ -184,6 +226,41 @@ try
         store.SelectCandidate(good);
         using (store.Lock("stage")) await Reject(() => new LaunchCoordinator(store, bundles).Launch(CancellationToken.None));
         Check(File.ReadAllText(binding + ".history") == "ready\n" && store.Read().Blocked is null, "busy selection does not authorize recovery");
+    });
+    await Test("cross-version startup uses an inventoried exact pair and returns the previous version on failure", async () =>
+    {
+        foreach (var mode in new[] { "ready", "wrong-profile", "later-failure", "damaged-outgoing-cache" })
+        {
+            var store = new InstallationStore(Path.Combine(root, "transition-" + mode));
+            var profile = FreshProfile.Create(store, Path.Combine(root, "transition-profile-" + mode), "dev").Profile;
+            var bundles = new BundleStore(store.Root);
+            var oldArchive = Package("ready", []);
+            var old = bundles.Stage(oldArchive, Wire.Hash(oldArchive), new FileInfo(oldArchive).Length);
+            store.SelectCandidate(old);
+            await new LaunchCoordinator(store, bundles).Launch(CancellationToken.None);
+            var archive = Package(mode == "wrong-profile" ? mode : "ready", [old.Sha256], backend: "fixture-backend-v2+test", transitions: [old.Sha256]);
+            var next = bundles.Stage(archive, Wire.Hash(archive), new FileInfo(archive).Length);
+            Check(BackendTransition.Compatible(old, next, bundles), "exact documented version pair is admitted");
+            Check(!BackendTransition.Compatible(old with { Sha256 = new string('f', 64) }, next, bundles), "unlisted origin is refused");
+            store.SelectCandidate(next);
+            var selected = await new LaunchCoordinator(store, bundles).Launch(CancellationToken.None);
+            Check(selected == (mode != "wrong-profile" ? next.Sha256 : old.Sha256), "readiness selects correct version");
+            Check(store.Read().Current!.BackendVersion == (mode != "wrong-profile" ? "fixture-backend-v2+test" : "fixture-backend-v1"), "stored backend version follows acceptance");
+            if (mode == "later-failure")
+            {
+                File.WriteAllText(profile.BindingPath + ".fail-next", "fail accepted version once");
+                Check(await new LaunchCoordinator(store, bundles).Launch(CancellationToken.None) == old.Sha256, "later startup uses the primary's reverse authorization");
+            }
+            if (mode == "damaged-outgoing-cache")
+            {
+                using var descriptor = JsonDocument.Parse(File.ReadAllBytes(profile.BindingPath));
+                var cache = Path.Combine(descriptor.RootElement.GetProperty("desktopUserData").GetString()!, "cli", "fixture-backend-v2-test");
+                Directory.CreateDirectory(cache);
+                File.WriteAllText(Path.Combine(cache, "opencode-cli.exe"), "damaged stopped executable");
+                Check(await new LaunchCoordinator(store, bundles).Launch(CancellationToken.None) == old.Sha256, "damaged stopped outgoing cache cannot block healthy fallback");
+            }
+            Check(File.ReadAllText(profile.BindingPath + ".history") == (mode == "ready" ? "ready\nready\n" : mode == "later-failure" ? "ready\nready\nwrong-profile\nready\n" : mode == "damaged-outgoing-cache" ? "ready\nready\nready\n" : "ready\nwrong-profile\nready\n"), "no profile snapshot overwrites new history");
+        }
     });
     await Test("real readiness commits exact profile and bundle; launcher retains profile lock", async () =>
     {
@@ -413,7 +490,7 @@ async Task Test(string name, Func<Task> action)
     return (store, binding, id);
 }
 
-string Package(string mode, string[] fallbacks, bool invalidExecutable = false, string? storage = null, string backend = "fixture-backend-v1")
+string Package(string mode, string[] fallbacks, bool invalidExecutable = false, string? storage = null, string backend = "fixture-backend-v1", string[]? transitions = null)
 {
     var content = Path.Combine(root, "bundle-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(content);
@@ -422,10 +499,15 @@ string Package(string mode, string[] fallbacks, bool invalidExecutable = false, 
         if (Path.GetExtension(file) is ".exe" or ".dll" or ".json") File.Copy(file, Path.Combine(content, Path.GetFileName(file)));
     }
     File.WriteAllText(Path.Combine(content, "fixture-mode.txt"), mode);
+    File.WriteAllText(Path.Combine(content, "fixture-backend.txt"), backend);
+    Directory.CreateDirectory(Path.Combine(content, "resources", "lingxi-updater"));
+    File.WriteAllText(Path.Combine(content, "resources", "opencode-cli.exe"), backend);
+    if (transitions is not null)
+        Wire.AtomicWrite(Path.Combine(content, "resources", "lingxi-updater", "backend-transition.json"), new BackendTransitionContract(1, backend, transitions));
     if (invalidExecutable) File.WriteAllText(Path.Combine(content, "broken.exe"), "not an executable");
     var manifest = new BundleManifest(1, "fixture-" + Guid.NewGuid().ToString("N"), invalidExecutable ? "broken.exe" : "Lingxi.Launcher.Tests.exe",
         storage ?? new string('a', 64), backend, fallbacks,
-        Directory.GetFiles(content).Select(file => new BundleFile(Path.GetFileName(file), new FileInfo(file).Length, Wire.Hash(file))).ToArray());
+        Directory.GetFiles(content, "*", SearchOption.AllDirectories).Select(file => new BundleFile(Path.GetRelativePath(content, file).Replace('\\', '/'), new FileInfo(file).Length, Wire.Hash(file))).ToArray());
     File.WriteAllText(Path.Combine(content, "bundle.json"), JsonSerializer.Serialize(manifest, Wire.Json));
     var archive = content + ".zip";
     ZipFile.CreateFromDirectory(content, archive);
