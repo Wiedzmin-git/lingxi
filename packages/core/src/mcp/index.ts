@@ -329,7 +329,11 @@ export const layer = (options?: Options) =>
         (name: ServerName, entry: ServerEntry, connection: McpClient.Connection) =>
         <E>(effect: Effect.Effect<void, E>) =>
           fork(
-            Effect.suspend(() => (entry.client === connection ? effect : Effect.void)).pipe(
+            // Scope teardown closes transports too. Reporting that as a live disconnect
+            // makes subscribed clients reload the evicted Location and respawn its MCPs.
+            Effect.suspend(() =>
+              root.state._tag !== "Closed" && entry.client === connection ? effect : Effect.void,
+            ).pipe(
               locks.withLock(name),
               Effect.ignore,
             ),
@@ -339,7 +343,7 @@ export const layer = (options?: Options) =>
       // replaced the connection while this one waited for the lock.
       const recover = (name: ServerName, entry: ServerEntry, connection: McpClient.Connection) =>
         Effect.gen(function* () {
-          if (entry.client !== connection) return
+          if (root.state._tag === "Closed" || entry.client !== connection) return
           yield* Effect.logInfo("mcp session expired, reconnecting", { server: name })
           yield* stopServer(name, entry)
           yield* startServer(name, entry)

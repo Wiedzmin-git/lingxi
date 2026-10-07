@@ -313,16 +313,17 @@ function resourceMcpLayer(
         Layer.succeed(Location.Service, Location.Service.of(location({ directory }))),
         Layer.mock(Bus.Service, {
           subscribe: overrides?.subscribe ?? (() => Stream.never),
-          publish: (definition, data) => {
-            const event = {
-              id: ID.create(),
-              type: definition.type,
-              data,
-            } as Payload<typeof definition>
-            overrides?.published?.push(event.type)
-            if (event.type !== Form.Event.Created.type || !onFormCreated) return Effect.succeed(event)
-            return onFormCreated(Schema.decodeUnknownSync(Form.Event.Created.data)(data).form).pipe(Effect.as(event))
-          },
+          publish: (definition, data) =>
+            Effect.suspend(() => {
+              const event = {
+                id: ID.create(),
+                type: definition.type,
+                data,
+              } as Payload<typeof definition>
+              overrides?.published?.push(event.type)
+              if (event.type !== Form.Event.Created.type || !onFormCreated) return Effect.succeed(event)
+              return onFormCreated(Schema.decodeUnknownSync(Form.Event.Created.data)(data).form).pipe(Effect.as(event))
+            }),
         }),
         Layer.mock(Integration.Service, {
           revision: () => 0,
@@ -1555,6 +1556,35 @@ it.live("discovers and reads MCP resources through Code Mode", () =>
     }).pipe(Effect.provide(resourceMcpLayer(server.url)))
   }),
 )
+
+test("closing the MCP owner does not publish a live disconnect that reboots its Location", async () => {
+  const published: string[] = []
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => State.shutdown(Scope.close(scope, Exit.void)))
+      const context = yield* Layer.build(
+        resourceMcpLayer(
+          new ConfigMCP.Local({
+            type: "local",
+            command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
+          }),
+          undefined,
+          undefined,
+          { published },
+        ),
+      ).pipe(Scope.provide(scope))
+      const service = Context.get(context, Mcp.Service)
+      yield* service.tools()
+      yield* Effect.suspend(() =>
+        published.includes(Mcp.PromptsChanged.type) ? Effect.void : Effect.fail("startup not settled"),
+      ).pipe(Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }))
+      expect((yield* service.servers())[0]?.status).toEqual({ status: "connected" })
+      published.length = 0
+    }).pipe(Effect.scoped),
+  )
+  expect(published).toEqual([])
+})
 
 test("adds, disconnects, and reconnects MCP servers at runtime", async () => {
   const published: string[] = []
