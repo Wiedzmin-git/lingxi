@@ -17,6 +17,9 @@ if (process.versions.bun !== expectedBunVersion) {
   console.warn(`Warning: Bun version ${process.versions.bun} differs from expected ${expectedBunVersion}`);
 }
 '
-# Git keeps the ref-update input open until this hook returns. The check has
-# no use for that stream; do not let its child commands inherit Git's stdin.
-bun run check </dev/null
+# Let the checker discover this worktree from its working directory, as it
+# does when run directly, rather than inheriting Git's hook-local paths.
+(
+  unset $(git rev-parse --local-env-vars)
+  bun run check </dev/null
+)
