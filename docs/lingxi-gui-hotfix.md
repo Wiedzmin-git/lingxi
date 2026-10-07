@@ -27,6 +27,14 @@ settlement before cache initialization and simultaneous global location reads.
 Settings/native-copy tests: 41 passed. Canonical repository check: 36 tasks passed.
 Strict changed GUI file lint: zero problems.
 
+Published dev.1 → hotfix transition also passed with the same running backend PID:
+messages, queued input identity, unsent draft, profile binding and an explicitly saved
+horizontal-tab preference were preserved. The Session Link host recognizes the
+previous bundle's active carrier only after matching policy/connection paths and
+byte-comparing its runtime package. Active-generation attestation remains required.
+Bootstrap compatibility tests: 6 passed, including changed/missing runtime rejection
+and an inactive superseded declaration preceding the compatible active carrier.
+
 ## Compatibility and update
 
 The backend remains byte-identical to published dev.1 (`2.0.23-lingxi.dev.1`), with

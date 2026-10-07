@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { setTimeout } from "node:timers/promises"
@@ -44,15 +44,23 @@ export async function prepareDesktopLink(root, configContent) {
       }
       const samePath = (a, b) => typeof a === "string" && normalized(a) === normalized(b)
       const entries = await api.requestEnvelope("GET", "/api/config")
-      const candidates = entries.flatMap((entry) => entry.info?.plugins ?? []).filter((plugin) => samePath(typeof plugin === "string" ? plugin : plugin.package, packagePath))
+      const candidates = entries.flatMap((entry) => entry.info?.plugins ?? []).filter((plugin) => typeof plugin === "object" && samePath(plugin.options?.policyFile, policyFile) && samePath(plugin.options?.connectionFile, connectionFile))
       // Earlier declarations may be legitimately superseded. The generation's
       // attestation below, not unanimity of source documents, owns the binding.
-      const bound = candidates.some((plugin) => typeof plugin === "object" && samePath(plugin.options?.policyFile, policyFile) && samePath(plugin.options?.connectionFile, connectionFile))
+      const boundPackages = []
+      for (const plugin of candidates) {
+        if (typeof plugin.package !== "string") continue
+        const candidate = plugin.package.startsWith("file:") ? fileURLToPath(plugin.package) : plugin.package
+        if (!path.isAbsolute(candidate)) continue
+        if (samePath(candidate, packagePath) || await sameRuntimePackage(candidate, packagePath)) {
+          boundPackages.push(candidate)
+        }
+      }
       const unavailable = async (reason) => {
         await writeFile(path.join(root, "runtime.json"), JSON.stringify({ desktopPID: process.pid, server: url, pid: info.pid, version: info.version, status: "unavailable", reason, controls: "disabled" }, null, 2))
         return { status: "unavailable", reason }
       }
-      if (!bound) return await unavailable("compatible-service-missing-session-link-binding")
+      if (!boundPackages.length) return await unavailable("compatible-service-missing-session-link-binding")
       // Merely adopting a version-compatible service does not install a plugin.
       // Warm its ordinary location registry and verify the exact loaded carrier.
       await api.request("GET", "/api/agent")
@@ -60,7 +68,7 @@ export async function prepareDesktopLink(root, configContent) {
       let active = false
       while (Date.now() < deadline) {
         const plugins = await api.request("GET", "/api/plugin")
-        active = plugins.some((plugin) => plugin.id === "session-link" && plugin.state.status === "active" && plugin.source.type === "local" && samePath(plugin.source.path, path.join(packagePath, "index.js")))
+        active = plugins.some((plugin) => plugin.id === "session-link" && plugin.state.status === "active" && plugin.source.type === "local" && boundPackages.some((root) => samePath(plugin.source.path, path.join(root, "index.js"))))
         if (active) break
         await setTimeout(100)
       }
@@ -103,5 +111,27 @@ export async function prepareDesktopLink(root, configContent) {
       throw new Error("Unknown R2 owner operation")
     },
     async close() { await running?.close(); running = undefined },
+  }
+}
+
+// Digest-addressed GUI bundles have different paths while a compatible backend
+// stays alive. Reuse its exact bound carrier only when all runtime bytes match.
+// desktop-host is this Desktop-only bootstrap adapter, never a backend import.
+async function sameRuntimePackage(candidate, current) {
+  try {
+    const files = async (root) => {
+      const names = (await readdir(path.join(root, "src"))).filter((name) => name !== "desktop-host.mjs").sort()
+      return ["package.json", "index.js", ...names.map((name) => `src/${name}`)]
+    }
+    const expected = await files(current)
+    if (JSON.stringify(await files(candidate)) !== JSON.stringify(expected)) return false
+    for (const file of expected) {
+      const [a, b] = await Promise.all([readFile(path.join(candidate, file)), readFile(path.join(current, file))])
+      if (!a.equals(b)) return false
+    }
+    return true
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR", "EISDIR", "EACCES"].includes(error.code)) return false
+    throw error
   }
 }
