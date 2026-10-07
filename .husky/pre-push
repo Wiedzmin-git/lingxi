@@ -17,4 +17,6 @@ if (process.versions.bun !== expectedBunVersion) {
   console.warn(`Warning: Bun version ${process.versions.bun} differs from expected ${expectedBunVersion}`);
 }
 '
-bun run check
+# Git keeps the ref-update input open until this hook returns. The check has
+# no use for that stream; do not let its child commands inherit Git's stdin.
+bun run check </dev/null
