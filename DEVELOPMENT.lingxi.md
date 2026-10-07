@@ -1,6 +1,6 @@
 # Lingxi source development
 
-This is an in-development fork based on OpenCode 2.0.23. Use **Bun 1.4.2**, the version pinned in `package.json`. Run `bun install --frozen-lockfile` at the repository root. On Windows, use `bun install --frozen-lockfile --linker hoisted`: this was verified in the initial checkout and avoids an observed nested Babel package path failure. Avoid running installation through a SUBST drive: Bun can record absolute workspace paths in that mode.
+This is an in-development fork based on OpenCode 2.0.23. Use **Bun 1.4.2**, the version pinned in `package.json`. Run `bun install --frozen-lockfile` at the repository root. On Windows, use a **short physical checkout path**, such as `D:\lx`, with the default isolated linker. That clean layout passed the complete repository check. A longer path failed to install a deeply nested Babel package; switching to the hoisted linker then exposed Vite peer-type conflicts. Avoid installation through a SUBST drive: Bun can record absolute workspace paths in that mode. Do not mix linker layouts in an existing dependency tree.
 
 ## Checks
 
@@ -39,5 +39,5 @@ New Session Link profiles begin with no external senders. Their owner configures
 - Core job, execution, shell and subagent suites: **115 passed, 63 skipped, 0 failed**.
 - Desktop packaging/prebuild checks: **8 passed**. Session Link bootstrap: **1 passed**.
 - Type checks passed for all 11 selected application packages: core, desktop, app, gui-extensions, session-ui, ui, client, plugin, protocol, schema and server.
-- Full repository checks are **not green**: the clean Windows hoisted installation exposes a Vite 7/8 plugin type mismatch in the inherited console app. Full oxlint reports 0 errors and 11,678 warnings; the stricter changed-file lint also fails on the imported code. These are retained follow-up work, not waived release acceptance.
+- Full `bun run check` **passed**, including all **36 typecheck tasks**, in a clean short-path Windows worktree with isolated dependencies. This resolved the earlier hoisted-install Vite conflict without source changes or disabled checks. Full oxlint still reports warn-level style debt; the separate strict changed-file lint fails on the imported code and remains follow-up work, not a waived release check.
 - No new Lingxi installer or automatic recovery has been accepted. Earlier local runtime/UI evidence is not a substitute for testing the eventual packaged Lingxi release.
