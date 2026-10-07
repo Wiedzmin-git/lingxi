@@ -21,8 +21,8 @@ export function createWriteBehind<T>(input: {
       // The renderer already saw these writes succeed. Keep them queued so the next flush retries
       // them; anything written for the same key since then takes precedence.
       for (const [key, value] of batch) if (!pending.has(key)) pending.set(key, value)
-      if (!input.onError) throw error
-      input.onError(error)
+      input.onError?.(error)
+      throw error
     }
   }
 
@@ -33,7 +33,15 @@ export function createWriteBehind<T>(input: {
     set(key: string, value: T) {
       if (closed) return
       pending.set(key, value)
-      timer ??= setTimeout(flush, input.delay)
+      timer ??= setTimeout(() => {
+        try {
+          flush()
+        } catch (error) {
+          // A background flush can retain its batch for retry. An explicit
+          // durability barrier must instead propagate failure to its caller.
+          if (!input.onError) throw error
+        }
+      }, input.delay)
     },
     drop(predicate: (value: T) => boolean) {
       for (const [key, value] of pending) if (predicate(value)) pending.delete(key)

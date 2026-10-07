@@ -53,18 +53,14 @@ export const layer = Layer.effect(
     const restart = async (handoff?: () => void | Promise<void>) => {
       setAppQuitting()
       await runPromise(lifecycle.prepareToRestart)
+        .then(() => {
+          if (handoff) return handoff()
 
-      if (!handoff) {
-        app.relaunch()
-        app.quit()
-
-        return
-      }
-
-      await Promise.resolve()
-        .then(handoff)
+          app.relaunch()
+          app.quit()
+        })
         .catch((cause: unknown) => {
-          setAppQuitting(false)
+          lifecycle.cancelRestart()
           throw cause
         })
     }

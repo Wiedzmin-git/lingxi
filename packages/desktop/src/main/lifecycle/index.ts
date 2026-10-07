@@ -17,6 +17,7 @@ import { consoleReturnWindow } from "./deep-link"
 export interface Interface {
   readonly relaunch: () => void
   readonly prepareToRestart: Effect.Effect<void>
+  readonly cancelRestart: () => void
   readonly consumeInitialDeepLinks: () => string[]
   readonly createWindow: () => BrowserWindow
   readonly restoreWindows: () => BrowserWindow[]
@@ -28,13 +29,24 @@ const runtime = Layer.effect(
   Service,
   Effect.gen(function* () {
     const shutdown = yield* Shutdown.Service
+    const storage = yield* DesktopStorage.Service
     const runFork = Effect.runForkWith(yield* Effect.context())
     const windows = yield* makeMainWindows()
     const createWindow = windows.create
     const restoreWindows = windows.restore
     const pendingDeepLinks: string[] = []
     let shutdownReady = false
-    const prepareToRestart = shutdown.run.pipe(Effect.ensuring(Effect.sync(() => (shutdownReady = true))))
+    let quitPending = false
+    const cancelRestart = () => {
+      shutdownReady = false
+      quitPending = false
+      setAppQuitting(false)
+    }
+    const prepareToRestart = Effect.sync(() => storage.flush()).pipe(
+      Effect.andThen(shutdown.run),
+      Effect.andThen(Effect.sync(() => storage.flush())),
+      Effect.andThen(Effect.sync(() => (shutdownReady = true))),
+    )
     const focusWindow = (win: BrowserWindow | null) => {
       if (!win) return
       if (win.isMinimized()) win.restore()
@@ -57,12 +69,16 @@ const runtime = Layer.effect(
       setAppQuitting()
       runFork(
         prepareToRestart.pipe(
-          Effect.ensuring(
+          Effect.andThen(
             Effect.sync(() => {
               app.relaunch()
               app.quit()
             }),
           ),
+          Effect.catchCause((cause) => {
+            cancelRestart()
+            return Effect.logError("application relaunch blocked", { cause })
+          }),
         ),
       )
     }
@@ -79,11 +95,31 @@ const runtime = Layer.effect(
       runFork(Effect.logInfo("deep link received via open-url", { url }))
       focusWindow(emitDeepLinks([url]) ?? null)
     }
+    const finishQuit = prepareToRestart.pipe(
+      Effect.andThen(Effect.sync(() => app.quit())),
+      Effect.catchCause((cause) => {
+        cancelRestart()
+        return Effect.logError("application shutdown blocked", { cause })
+      }),
+    )
     const beforeQuit = (event: Event) => {
       setAppQuitting()
-      if (shutdownReady) return
+      // Readiness belongs to this quit attempt. Even after successful update
+      // preparation, new renderer writes must pass a fresh durability barrier.
+      if (shutdownReady) {
+        try {
+          storage.flush()
+          return
+        } catch {
+          cancelRestart()
+          event.preventDefault()
+          return
+        }
+      }
       event.preventDefault()
-      runFork(prepareToRestart.pipe(Effect.ensuring(Effect.sync(() => app.quit()))))
+      if (quitPending) return
+      quitPending = true
+      runFork(finishQuit)
     }
     const willQuit = () => {
       setAppQuitting()
@@ -103,7 +139,9 @@ const runtime = Layer.effect(
     }
     const signal = () => {
       setAppQuitting()
-      runFork(prepareToRestart.pipe(Effect.ensuring(Effect.sync(() => app.quit()))))
+      if (quitPending) return
+      quitPending = true
+      runFork(finishQuit)
     }
     const windowAllClosed = () => {
       if (process.platform !== "darwin") app.quit()
@@ -141,6 +179,7 @@ const runtime = Layer.effect(
     return Service.of({
       relaunch,
       prepareToRestart,
+      cancelRestart,
       consumeInitialDeepLinks: () => pendingDeepLinks.splice(0),
       createWindow,
       restoreWindows: () => {

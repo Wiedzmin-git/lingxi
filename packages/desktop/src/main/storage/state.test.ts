@@ -73,7 +73,7 @@ describe("state store", () => {
     store.set("w", "tabs", "[1]")
     store.set("w", "recent", "{}")
     database.db.run(sql`DROP TABLE state`)
-    store.flush()
+    expect(() => store.flush()).toThrow()
     expect(errors).toHaveLength(1)
     expect(store.get("w", "tabs")).toBe("[1]")
     database.db.run(

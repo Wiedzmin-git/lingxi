@@ -33,15 +33,20 @@ export const layer = Layer.effect(
       ),
       Effect.catch((error) => Effect.logWarning("failed to import legacy store files", { error })),
     )
-    const wire = (_event: Electron.Event | undefined, win: BrowserWindow) => win.on("session-end", storage.flush)
-    app.on("before-quit", storage.flush)
+    // Controlled quit is gated by ApplicationLifecycle. The OS session-end
+    // event cannot be vetoed here; storage's reporter records any failure.
+    const sessionEnd = () => {
+      try {
+        storage.flush()
+      } catch {}
+    }
+    const wire = (_event: Electron.Event | undefined, win: BrowserWindow) => win.on("session-end", sessionEnd)
     app.on("browser-window-created", wire)
     BrowserWindow.getAllWindows().forEach((win) => wire(undefined, win))
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
-        app.off("before-quit", storage.flush)
         app.off("browser-window-created", wire)
-        BrowserWindow.getAllWindows().forEach((win) => win.off("session-end", storage.flush))
+        BrowserWindow.getAllWindows().forEach((win) => win.off("session-end", sessionEnd))
         storage.close()
       }),
     )
@@ -72,6 +77,9 @@ export function make(filename: string, onError?: (error: unknown) => void) {
       drafts.flush()
     },
     close() {
+      // Keep both stores writable if either durability barrier fails.
+      state.flush()
+      drafts.flush()
       state.close()
       drafts.close()
       database.close()

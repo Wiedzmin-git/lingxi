@@ -1,6 +1,6 @@
 export * as Shutdown from "./shutdown"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Semaphore } from "effect"
 
 export interface Interface {
   readonly add: (effect: Effect.Effect<void>) => Effect.Effect<() => void>
@@ -13,7 +13,8 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const effects = new Set<Effect.Effect<void>>()
-    const run = yield* Effect.cached(
+    const lock = yield* Semaphore.make(1)
+    const run = lock.withPermits(1)(
       Effect.suspend(() => Effect.forEach(effects, (effect) => effect, { concurrency: "unbounded", discard: true })),
     )
     return Service.of({
