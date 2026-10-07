@@ -13,6 +13,9 @@ type Host = {
     connection: SidecarCredentials.Data & { directory: string },
   ) => Promise<{ status: "ready"; gateway: string } | { status: "unavailable"; reason: string }>
   close: () => Promise<void>
+  // SAFETY: This is the raw bundled MJS boundary. manageSessionLink supplies a
+  // decoded SessionLinkRequest and decodes every value returned to the renderer.
+  // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type, anti-slop/no-unknown-returns
   manage: (operation: string, input: Record<string, unknown>) => Promise<unknown>
 }
 
@@ -33,6 +36,8 @@ export const prepareSessionLink = Effect.fn("Desktop.prepareSessionLink")(functi
     () => import(pathToFileURL(path.join(root, "session-link", "src", "desktop-host.mjs")).href),
   )
 
+  // SAFETY: The import resolves only our bundled desktop-host.mjs, whose exported
+  // prepareDesktopLink owns this Host shape; packaged bytes are inventoried.
   const prepare = module.prepareDesktopLink as (root: string, config?: string) => Promise<Host>
   host = yield* Effect.tryPromise(() =>
     prepare(path.join(app.getPath("userData"), "session-link"), process.env.OPENCODE_CONFIG_CONTENT),
@@ -84,6 +89,9 @@ export async function manageSessionLink(request: SessionLinkRequest): Promise<Se
     return { ok: true }
   } catch (error) {
     const code =
+      // SAFETY: The complete condition validates the external error's code against
+      // the lowercase identifier grammar before any value reaches the renderer.
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof
       error instanceof Error && "code" in error && typeof error.code === "string" && /^[a-z_]+$/.test(error.code)
         ? error.code
         : "r2_unavailable"

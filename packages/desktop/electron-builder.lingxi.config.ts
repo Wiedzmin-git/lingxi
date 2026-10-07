@@ -2,6 +2,7 @@ import type { Configuration } from "electron-builder"
 import upstream from "./electron-builder.config"
 
 const version = process.env.LINGXI_DESKTOP_VERSION
+
 const updater = process.env.LINGXI_UPDATER_DIST
 
 if (!version || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version))

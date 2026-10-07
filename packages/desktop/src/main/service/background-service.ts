@@ -102,6 +102,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
     const file = profileBinding.serviceRegistration
     const fs = yield* FileSystem.FileSystem
     const recovery = process.env.LINGXI_SERVICE_UPGRADE_RECOVERY
+
     if (!recovery || !process.env.LINGXI_LAUNCH_ATTEMPT || !process.env.LINGXI_PROFILE_DIGEST)
       throw new Error("Install the current Lingxi setup before applying this Session Link runtime update")
 
@@ -140,6 +141,7 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
     if (Object.keys(active).length > 0) throw new Error("Session Link update is waiting for active sessions to finish")
     yield* Effect.logInfo("reloading idle bound service for Session Link runtime update")
     const contenders: number[] = []
+
     const note = {
       attemptId: process.env.LINGXI_LAUNCH_ATTEMPT,
       profileDigest: process.env.LINGXI_PROFILE_DIGEST,
@@ -149,15 +151,19 @@ const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial
       pendingSpawn: false,
       contenders,
     }
+
     const save = () => {
       writeFileSync(recovery + ".tmp", JSON.stringify(note), { flush: true })
       renameSync(recovery + ".tmp", recovery)
     }
+
     yield* Effect.sync(save)
     yield* Effect.tryPromise(() => client.Service.stop({ file, expected, pty: "handoff" }))
+
     const replacement = yield* Effect.tryPromise(() =>
       ensure((event) => {
         note.pendingSpawn = event.phase === "starting"
+
         if (event.phase === "spawned" && event.pid !== undefined) note.contenders.push(event.pid)
         save()
       }),
