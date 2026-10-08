@@ -3,10 +3,35 @@
 ## Delivery boundary
 
 An installation keeps its pinned profile. Staging does not activate a Desktop or
-restart its backend. The owner selected activation after closing and reopening
-Lingxi, with an observed-idle check. This is not an atomic admission barrier:
+restart its backend. Ordinary closing and reopening activates with an
+observed-idle check. This is not an atomic admission barrier:
 input arriving after that observation may be interrupted and recovered; tool
 effects are not rolled back.
+
+The explicit **Restart and apply** action additionally admits interruption and
+durable continuation when the selected update changes backend versions. It first
+verifies the staged selection and compatible return path, then saves every open
+window, including pending attachment reads/uploads and delayed draft writes. Each
+renderer acknowledges accepted persistence over its own IPC port. Input stays
+frozen until exit; a failed preparation releases the windows for correction and
+retry. The main process verifies the window inventory and flushes its storage
+again immediately before exiting.
+
+The candidate's verified helper waits for the exact old Desktop and supervisor
+to exit before launching. Its restart lock is released before it becomes the new
+long-running supervisor, so a later update can restart again. A new browser does
+not inherit the outgoing browser's crashpad pipe. UI-only updates keep the backend
+and active execution running. A backend-changing explicit restart carries
+`resumeActive` in the attested transition plan; ordinary starts retain the idle
+check. Downloading alone never admits interruption or activation.
+
+Continuation resumes durable execution claims, not a paused instruction inside
+an arbitrary shell or external tool. A fixed application-authored restart notice
+becomes a normalized System message only when its exact restart marker and text
+match. Provider adapters may lower that message to their native instruction-update
+representation; a literal HTTP `system` role is not guaranteed on every route.
+Command text and output remain ordinary context. Recovery may repeat an attempt,
+so the instruction requires inspecting existing effects before repeating work.
 
 The old supervisor cannot accept a different backend version and installed
 shortcuts point inside an immutable old bundle. Delivery therefore has two steps:

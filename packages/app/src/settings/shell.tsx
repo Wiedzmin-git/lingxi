@@ -39,6 +39,7 @@ import { useWorkspacesPrefetch } from "./workspaces/queries"
 import { SettingsProjects } from "./workspaces/projects"
 import { SettingsExtensions } from "./providers/extensions"
 import { SettingsAbout } from "./about/about"
+import { ExternalLink } from "@/runtime/platform/external-link"
 import { SettingsServerDataScope } from "./server-scope"
 import { SettingsNavigation, type SettingsNavGroup } from "./navigation"
 import { SettingsProjectGeneral } from "./workspaces/project"
@@ -57,6 +58,8 @@ const GuiExtensionsSettings = import.meta.env.DEV
   : undefined
 
 const rootClientTabs = [
+  { value: "history", icon: pageIcons.history, label: "settings.history.title" },
+  { value: "archived", icon: pageIcons.archived, label: "settings.archived.title" },
   { value: "general", icon: pageIcons.general, label: "settings.tab.preferences" },
   { value: "appearance", icon: pageIcons.appearance, label: "settings.general.section.appearance" },
   { value: "notifications", icon: pageIcons.notifications, label: "settings.tab.notifications" },
@@ -79,7 +82,14 @@ const guiExtensionsTab = [
   { value: "gui-extensions", icon: pageIcons["gui-extensions"], label: "settings.guiExtensions.title" },
 ] as const
 
-const aboutTab = [{ value: "about", icon: pageIcons.about, label: "settings.tab.about" }] as const
+const aboutTab = [
+  { value: "help", icon: pageIcons.help, label: "sidebar.help" },
+  { value: "about", icon: pageIcons.about, label: "settings.tab.about" },
+] as const
+
+const SessionHistory = lazy(() => import("@/home/route").then((module) => ({ default: module.SessionHistory })))
+
+const ArchivedSessions = lazy(() => import("./archived").then((module) => ({ default: module.ArchivedSessions })))
 
 const nestedServerTabs = [
   { value: "general", icon: pageIcons.servers, label: "settings.general.section.general" },
@@ -363,6 +373,20 @@ function RootSettings() {
     >
       <Tabs.Content value="general" class="settings-panel">
         <SettingsGeneral />
+      </Tabs.Content>
+      <Tabs.Content value="history" class="settings-panel">
+        <Suspense><SessionHistory /></Suspense>
+      </Tabs.Content>
+      <Tabs.Content value="archived" class="settings-panel">
+        <Suspense><ArchivedSessions /></Suspense>
+      </Tabs.Content>
+      <Tabs.Content value="help" class="settings-panel">
+        <div class="settings-section">
+          <h3 class="settings-section-title">{language.t("sidebar.help")}</h3>
+          <ExternalLink href="https://github.com/Wiedzmin-git/lingxi#readme">
+            {language.t("settings.help.description")}
+          </ExternalLink>
+        </div>
       </Tabs.Content>
       <Tabs.Content value="appearance" class="settings-panel">
         <SettingsAppearance />

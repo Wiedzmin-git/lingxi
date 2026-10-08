@@ -18,6 +18,10 @@ export const StorageUpdate = Rpc.make("StorageUpdate", {
 
 export const StorageClear = Rpc.make("StorageClear", { payload: { name: Schema.String } })
 
+export const StorageBarrierReady = Rpc.make("StorageBarrierReady", {
+  payload: { id: Schema.String, success: Schema.Boolean },
+})
+
 export const DraftsGet = Rpc.make("DraftsGet", {
   payload: { key: Schema.String },
   success: Schema.NullOr(Schema.String),
@@ -44,6 +48,7 @@ export const StorageRpcs = RpcGroup.make(
   StorageItems,
   StorageUpdate,
   StorageClear,
+  StorageBarrierReady,
   DraftsGet,
   DraftsSet,
   DraftsDelete,

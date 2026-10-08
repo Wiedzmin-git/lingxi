@@ -29,6 +29,26 @@ try
     var bundles = new BundleStore(installation.Root);
     switch (args[0])
     {
+        case "desktop-restart" when args.Length == 4:
+            try
+            {
+                await DesktopRestart.Run(installation, bundles, new DesktopUpdateContext(
+                    Environment.GetEnvironmentVariable("LINGXI_PROFILE_ID") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_PROFILE_DIGEST") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_LAUNCH_ATTEMPT") ?? "",
+                    Environment.GetEnvironmentVariable("LINGXI_BUNDLE_DIGEST") ?? ""), args[2], args[3], () =>
+                    {
+                        Console.WriteLine("ready");
+                        Console.Out.Flush();
+                        Console.SetOut(TextWriter.Null);
+                    }, CancellationToken.None);
+            }
+            catch
+            {
+                Wire.AtomicWrite(Path.Combine(installation.Root, "restart-result.json"), new { status = "failed", at = DateTimeOffset.UtcNow });
+                throw;
+            }
+            break;
         case "desktop-check" when args.Length == 2:
         case "desktop-stage" when args.Length == 4:
             using (var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(args[0] == "desktop-check" ? 1 : 15)))
@@ -161,7 +181,11 @@ Action<long, long> Progress(bool wire)
         var percent = (int)(100 * received / total);
         if (wire)
         {
-            Console.Error.WriteLine(JsonSerializer.Serialize(new { percent }, new JsonSerializerOptions(Wire.Json) { WriteIndented = false }));
+            var bytesPerSecond = seconds >= 1 ? received / seconds : 0;
+            double? remainingSeconds = seconds >= 3 && bytesPerSecond > 0
+                ? Math.Ceiling((total - received) / bytesPerSecond)
+                : null;
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { percent, received, total, bytesPerSecond, remainingSeconds }, new JsonSerializerOptions(Wire.Json) { WriteIndented = false }));
             return;
         }
         Console.Write($"\r{percent,3}%  {received / 1048576.0:F1}/{total / 1048576.0:F1} MB  {received / Math.Max(seconds, 0.001) / 1048576.0:F1} MB/s    ");

@@ -8,9 +8,10 @@ type Mutable<Value> =
       ? { -readonly [Key in keyof Value]: Mutable<Value[Key]> }
       : Value
 
+// SAFETY: RPC values are renderer-owned structured clones; removing readonly changes no runtime shape.
 const mutable = <Value>(value: Value) => value as Mutable<Value>
-const toArrayBuffer = (value: Uint8Array) =>
-  value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
+
+const toArrayBuffer = (value: Uint8Array) => new Uint8Array(value).buffer
 
 // One renderer-side copy: the bridge clones on every crossing, so consumption is tracked here.
 const seeded = window.electron.storageSnapshot.then((snapshot) => new Map(Object.entries(snapshot)))
@@ -33,12 +34,17 @@ export const api: ElectronAPI = {
   storeItems: (name) =>
     seeded.then((snapshot) => {
       const item = snapshot.get(name)
+
       if (!item) return invoke("StorageItems", { name }).then(mutable)
+
       snapshot.delete(name)
+
       return item
     }),
   storeUpdate: (name, insert, remove) => invoke("StorageUpdate", { name, insert, remove }),
   storeClear: (name) => invoke("StorageClear", { name }),
+  onPersistenceBarrier: (cb) => listen("PersistenceBarrier", (event) => cb(event.id, event.phase)),
+  persistenceBarrierReady: (id, success) => invoke("StorageBarrierReady", { id, success }),
   onStoreChanged: (cb) =>
     listen("StorageChanged", (event) => cb(event.name, mutable(event.insert), mutable(event.remove), event.revision)),
   draftGet: (key) => invoke("DraftsGet", { key }),

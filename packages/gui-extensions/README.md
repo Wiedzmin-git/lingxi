@@ -214,6 +214,10 @@ SDK icon fields use `IconName` from `@opencode/ui/icons/catalog`, a dependency-f
 | [`Server`](src/sdk/points.ts)       | window  | A source of servers, such as SSH hosts                                                      |
 | [`LinkHandler`](src/sdk/points.ts)  | window  | Opens local links, such as file paths in messages                                           |
 | [`TitlebarItem`](src/sdk/points.ts) | window  | A titlebar pill, or the dev channel badge as a toggle                                       |
+
+Titlebar pills size their revealed label to its content. `expanded: true` keeps status text visible;
+`attention` identifies a new notice and requests a soft heartbeat until hover or keyboard focus.
+The host respects reduced-motion preferences. Omit `attention` to disable animation.
 | [`Slot`](src/sdk/points.ts)         | window  | Content for `window.bottom`, `session.header`, `session.panel.end`, `session.panel.sidebar` |
 | [`Style`](src/sdk/points.ts)        | window  | CSS imported with `?inline`                                                                 |
 | [`MenubarItem`](src/sdk/main.ts)    | main    | An item of the native app menu                                                              |

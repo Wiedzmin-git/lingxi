@@ -22,18 +22,26 @@ public static class SupervisorBootstrap
 
     public static bool Current(InstallationStore installation, Installation state)
     {
-        if (state.Attempt is not { } attempt) return false;
+        using var process = Open(installation, state);
+        return process is not null;
+    }
+
+    public static Process? Open(InstallationStore installation, Installation state)
+    {
+        if (state.Attempt is not { } attempt) return null;
         var file = ReceiptPath(installation, attempt.Id);
-        if (!File.Exists(file)) return false;
+        if (!File.Exists(file)) return null;
         var receipt = Wire.Read<SupervisorReceipt>(file);
         if (receipt.Protocol != 2 || receipt.AttemptId != attempt.Id || receipt.BundleSha256 != attempt.Sha256
-            || receipt.ProfileDigest != state.Profile.BindingSha256) return false;
+            || receipt.ProfileDigest != state.Profile.BindingSha256) return null;
         try
         {
-            using var process = Process.GetProcessById(receipt.ProcessId);
-            return !process.HasExited && process.StartTime.ToUniversalTime() == receipt.StartedAt.UtcDateTime;
+            var process = Process.GetProcessById(receipt.ProcessId);
+            if (!process.HasExited && process.StartTime.ToUniversalTime() == receipt.StartedAt.UtcDateTime) return process;
+            process.Dispose();
+            return null;
         }
-        catch (ArgumentException) { return false; }
+        catch (ArgumentException) { return null; }
     }
 
     public static void Prepare(InstallationStore installation, BundleStore bundles, Installation state)

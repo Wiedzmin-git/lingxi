@@ -40,6 +40,9 @@ stage-local <installation-root> <bundle.zip> <sha256> <bytes>
 credential
 stage <installation-root>
 launch <installation-root>
+desktop-check <installation-root>
+desktop-stage <installation-root> <bundle-sha256> <dev|stable>
+desktop-restart <installation-root> <bundle-sha256> <dev|stable>
 ```
 
 Use fully qualified paths. The binding follows `docs/lingxi-profile-binding.md`.
@@ -50,6 +53,13 @@ the same Desktop profile. Dev/stable are channels of that installation.
 different-channel staged candidate is cleared; run `stage` to select the new
 channel's bundle. A concurrent staging operation makes the channel change fail
 without mutation. A channel change does not activate or restart anything.
+
+The `desktop-*` commands require the active Desktop's exact profile, attempt and
+bundle environment binding. `desktop-restart` performs a verified handoff to the
+candidate helper, waits for the bound Desktop/supervisor generation to exit and
+then launches with explicit active-work continuation admission. It does not kill
+the Desktop. A plain `launch` retains observed-idle backend replacement.
+See `docs/lingxi-backend-updates.md` for renderer persistence and recovery semantics.
 
 `initialize-new` is for an empty, new profile only. It refuses occupied directories
 and never adopts existing history. NSIS uses this on first install and only stages

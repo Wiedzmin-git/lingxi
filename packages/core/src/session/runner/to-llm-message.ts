@@ -12,6 +12,7 @@ import { Option, Schema } from "effect"
 import { fileURLToPath } from "url"
 import { SessionMessage } from "../message.js"
 import { SessionProviderContext } from "../provider-context.js"
+import { RESTART_INSTRUCTION, RESTART_NOTICE } from "../execution/restart-notice.js"
 import type { FileAttachment } from "@opencode/schema/prompt"
 
 const imageMimes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
@@ -282,6 +283,8 @@ function toLLMMessage(message: SessionMessage.Info, model: Model.Ref, providerMe
         }),
       ]
     case "synthetic":
+      if (message.metadata?.notice === "restart" && message.text === RESTART_NOTICE)
+        return [Message.system(RESTART_INSTRUCTION)]
       return [Message.make({ id: message.id, role: "user", content: message.text })]
     case "skill":
       return [Message.make({ id: message.id, role: "user", content: message.text, metadata: message.metadata })]

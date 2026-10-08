@@ -5,7 +5,7 @@ namespace Lingxi.Launcher;
 
 public sealed record BackendTransitionPlan(int Format, string AttemptId, string BundleSha256,
     string ProfileDigest, string PreviousVersion, string PreviousBackendSha256, string BackendVersion,
-    string? RegistrationSha256, bool PreviousRunning);
+    string? RegistrationSha256, bool PreviousRunning, bool ResumeActive = false);
 public sealed record BackendTransitionContract(int Format, string BackendVersion, string[] From);
 
 public static class BackendTransition
@@ -30,7 +30,7 @@ public static class BackendTransition
     }
 
     public static string? Prepare(InstallationStore installation, BundleStore bundles,
-        ProfileSelection profile, Attempt attempt, Slot? previous, Slot? reverseFrom = null)
+        ProfileSelection profile, Attempt attempt, Slot? previous, Slot? reverseFrom = null, bool resumeActive = false)
     {
         var selected = attempt.Bundle!;
         if (previous is null || previous.BackendVersion == selected.BackendVersion) return null;
@@ -66,7 +66,7 @@ public static class BackendTransition
         }
         var file = Path.Combine(installation.Root, "backend-transition-" + attempt.Id + ".json");
         Wire.AtomicWrite(file, new BackendTransitionPlan(1, attempt.Id, selected.Sha256, profile.BindingSha256,
-            previous.BackendVersion, backend.Sha256, selected.BackendVersion, registrationSha256, previousRunning));
+            previous.BackendVersion, backend.Sha256, selected.BackendVersion, registrationSha256, previousRunning, resumeActive));
         return file;
     }
 

@@ -571,9 +571,9 @@ export function createHost(input: {
   }
 
   getMainWindows().forEach(wire)
-  const stopWindows = onMainWindow(wire)
+  let stopWindows = onMainWindow(wire)
 
-  const stopLocale = onNativeTranslations(() => {
+  const updateLocale = () => {
     const locale = nativeLocale()
     void Promise.all(
       [...translations].map(async (translation) => {
@@ -582,7 +582,9 @@ export function createHost(input: {
         if (nativeLocale() === locale) translation.messages = messages
       }),
     ).then(scheduleMenubar)
-  })
+  }
+
+  let stopLocale = onNativeTranslations(updateLocale)
 
   setMenubarProvider(() =>
     menubarItems().map((entry) => ({
@@ -596,6 +598,17 @@ export function createHost(input: {
   )
 
   return {
+    /** Restores enabled providers and subscriptions after a failed restart preparation. */
+    async resume() {
+      if (!status.disposed) return
+      status.disposed = false
+      lifecycle.cancelQuit()
+      stopWindows = onMainWindow(wire)
+      stopLocale = onNativeTranslations(updateLocale)
+      const ids = [...local.map((definition) => definition.id), ...manager.installed().map((item) => item.id)]
+      await Promise.all(ids.map((id) => lifecycle.activate(id)))
+      scheduleMenubar()
+    },
     /** Activates every enabled main extension. The app calls this once its first window is up. */
     async start() {
       const ids = [...local.map((definition) => definition.id), ...manager.installed().map((item) => item.id)]

@@ -327,6 +327,10 @@ export function createLifecycle(input: {
 
   return {
     activate,
+    /** Reopens admission after a cancelled quit; the host reactivates its enabled entries. */
+    cancelQuit() {
+      status.quitting = false
+    },
     deactivate,
     reload,
     failure: (id: string) => errors.get(id),

@@ -30,6 +30,7 @@ import { sessionTabTitle } from "./tab-title"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-progress-indicator-v2"
 import { useSettingsDialog } from "@/settings/command"
+import { useSettingsSurface } from "@/settings/surface"
 import { rootSession } from "@/shell/routes/session"
 import { TitlebarItems, useTitlebarItems } from "@/runtime/extension/titlebar-items"
 import lingxiIcon from "../../../../desktop/icons/lingxi/icon.svg"
@@ -53,6 +54,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
   const language = useLanguage()
   const settings = useSettings()
   const openSettings = useSettingsDialog()
+  const settingsSurface = useSettingsSurface()
   const navigate = useNavigate()
   const location = useLocation()
   const mobile = createMediaQuery("(max-width: 767px)")
@@ -379,7 +381,13 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
               }
             }
 
-            const toggleHome = () => tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
+            const toggleHome = () => {
+              if (settingsSurface.active()) return settingsSurface.close()
+              const tab = currentTab()
+
+              if (tab) tabs.remember(tab)
+              openSettings()
+            }
 
             const homeButton = (vertical = false) => (
               <Show
@@ -389,7 +397,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                     placement="bottom"
                     value={
                       <>
-                        {language.t("home.title")}
+                        {language.t("sidebar.settings")}
                         <Keybind keys={command.keybindParts("home.toggle")} variant="neutral" />
                       </>
                     }
@@ -400,11 +408,11 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                       variant="ghost-muted"
                       size="large"
                       class="!w-9 shrink-0"
-                      icon={<Icon name="grid-plus" />}
-                      state={layout.route().type === "home" ? "pressed" : undefined}
+                      icon={<Icon name="settings-gear" />}
+                      state={settingsSurface.active() ? "pressed" : undefined}
                       onClick={toggleHome}
-                      aria-label={language.t("home.title")}
-                      aria-pressed={layout.route().type === "home"}
+                      aria-label={language.t("sidebar.settings")}
+                      aria-pressed={settingsSurface.active()}
                     />
                   </Tooltip>
                 }
@@ -413,14 +421,14 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                   type="button"
                   data-titlebar-tab-action
                   data-action="vertical-tabs-home"
-                  data-state={layout.route().type === "home" ? "pressed" : undefined}
+                  data-state={settingsSurface.active() ? "pressed" : undefined}
                   class="group mb-1 flex h-7 w-full shrink-0 items-center gap-1.5 rounded-[6px] ps-1.5 pe-2 text-[13px] leading-4 text-v2-text-text-faint hover:text-v2-text-text-base data-[state=pressed]:text-v2-text-text-base"
                   onClick={toggleHome}
-                  aria-label={language.t("home.title")}
-                  aria-pressed={layout.route().type === "home"}
+                  aria-label={language.t("sidebar.settings")}
+                  aria-pressed={settingsSurface.active()}
                 >
-                  <Icon name="grid-plus" class="shrink-0" />
-                  <span class="min-w-0 truncate">{language.t("home.title")}</span>
+                  <Icon name="settings-gear" class="shrink-0" />
+                  <span class="min-w-0 truncate">{language.t("sidebar.settings")}</span>
                   <span
                     class="ms-auto hidden min-w-0 truncate text-v2-text-text-faint group-hover:block group-focus-visible:block"
                     aria-hidden="true"
@@ -434,7 +442,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
             command.register("titlebar-home", () => [
               {
                 id: "home.toggle",
-                title: language.t("home.title"),
+                title: language.t("sidebar.settings"),
                 category: language.t("command.category.view"),
                 keybind: windows() ? "alt+home" : "mod+b",
                 hidden: true,
@@ -489,7 +497,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
             const currentTitle = () => {
               const tab = currentTab()
 
-              if (!tab) return language.t("home.title")
+              if (!tab) return language.t("sidebar.settings")
 
               if (tab.type === "draft") return language.t("session.tab.session")
               const value = session()
@@ -618,20 +626,6 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                             {language.t("command.session.new")}
                           </button>
                           <div class="flex shrink-0 flex-col gap-1 border-t border-v2-border-border-muted pt-2">
-                            <button
-                              type="button"
-                              data-action="mobile-tabs-home"
-                              data-state={layout.route().type === "home" ? "pressed" : undefined}
-                              aria-current={layout.route().type === "home" ? "page" : undefined}
-                              class="flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-[13px] leading-4 text-v2-text-text-faint data-[state=pressed]:text-v2-text-text-base focus-visible:outline-none"
-                              onClick={() => {
-                                if (layout.route().type !== "home") toggleHome()
-                                setMobileTabs("open", false)
-                              }}
-                            >
-                              <Icon name="grid-plus" />
-                              {language.t("home.title")}
-                            </button>
                             <div class="flex items-center gap-1">
                               <button
                                 type="button"

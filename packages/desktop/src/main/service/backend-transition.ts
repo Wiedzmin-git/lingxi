@@ -16,6 +16,7 @@ const Plan = Schema.Struct({
   backendVersion: Schema.String,
   registrationSha256: Schema.NullOr(Schema.String),
   previousRunning: Schema.Boolean,
+  resumeActive: Schema.optional(Schema.Boolean),
 })
 
 const Registration = Schema.Struct({
@@ -55,14 +56,15 @@ export async function prepareBackendTransition(version: string): Promise<EnsureO
 
   if ((bytes ? createHash("sha256").update(bytes).digest("hex") : null) !== plan.registrationSha256)
     throw new Error(nativeT("desktop.backendUpdate.registrationChanged"))
+
   const expected = bytes
     ? Schema.decodeUnknownSync(Schema.fromJsonString(Registration))(bytes.toString("utf8"))
     : undefined
 
   if (expected && expected.version !== plan.previousVersion)
     throw new Error(nativeT("desktop.backendUpdate.previousMismatch"))
-  // The owner selected observed-idle replacement. New input can arrive after the
-  // observation; durable recovery does not undo already performed tool effects.
+  // Ordinary close/open keeps observed-idle replacement. An explicit updater
+  // restart may resume active claims; completed tool effects are never rolled back.
   const contenders: number[] = []
 
   const note = {
@@ -100,7 +102,7 @@ export async function prepareBackendTransition(version: string): Promise<EnsureO
         await response.json(),
       )
 
-      if (Object.keys(active.data).length) throw new Error(nativeT("desktop.backendUpdate.busy"))
+      if (Object.keys(active.data).length && !plan.resumeActive) throw new Error(nativeT("desktop.backendUpdate.busy"))
     }
   }
 

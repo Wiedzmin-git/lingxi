@@ -16,10 +16,16 @@ export const pageIcons = {
   experimental: "flask",
   "gui-extensions": "extensions",
   about: "info",
+  history: "history",
+  archived: "history",
+  help: "help",
 } as const satisfies Record<SettingsRootTab, IconProps["name"]>
 
 export const pageLabels = {
   general: "settings.tab.preferences",
+  history: "settings.history.title",
+  archived: "settings.archived.title",
+  help: "sidebar.help",
   appearance: "settings.general.section.appearance",
   notifications: "settings.tab.notifications",
   shortcuts: "settings.shortcuts.title",

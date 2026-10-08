@@ -12,6 +12,9 @@ export type SettingsRootTab =
   | "experimental"
   | "gui-extensions"
   | "about"
+  | "history"
+  | "archived"
+  | "help"
 
 declare const extensionTab: unique symbol
 
@@ -60,6 +63,9 @@ const rootTabs: Record<SettingsRootTab, true> = {
   experimental: true,
   "gui-extensions": true,
   about: true,
+  history: true,
+  archived: true,
+  help: true,
 }
 
 const serverTabs: Record<SettingsServerTab, true> = {

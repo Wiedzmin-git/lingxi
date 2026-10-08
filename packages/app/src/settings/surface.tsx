@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import { createSimpleContext } from "@opencode/ui/context"
 import { useLayout, type LayoutRoute } from "@/shell/state/layout"
 import { useCommand } from "@/shell/commands/command"
+import { useTabs } from "@/shell/tabs/tabs"
 import { createSettingsPages } from "@/runtime/extension/settings-pages"
 import { useSettingsServers } from "./servers/inventory"
 import {
@@ -37,6 +38,7 @@ export const { use: useSettingsSurface, provider: SettingsSurfaceProvider } = cr
     const navigate = useNavigate()
     const layout = useLayout()
     const command = useCommand()
+    const tabs = useTabs()
     const servers = useSettingsServers()
 
     const location = useLocation<{
@@ -46,6 +48,18 @@ export const { use: useSettingsSurface, provider: SettingsSurfaceProvider } = cr
     const extensions = createSettingsPages()
     const open = () => layout.route().type === "settings"
     const source = () => location.state?.settings?.route ?? { type: "home" as const }
+
+    const close = () => {
+      if (!open()) return
+
+      if (source().type === "home") {
+        tabs.toggleHome({ home: true })
+
+        return
+      }
+
+      command.trigger("common.goBack")
+    }
 
     const view = () =>
       parseSettingsView(location.search, servers().length > 1, location.state?.settings?.view, extensions.tabs())
@@ -176,7 +190,7 @@ export const { use: useSettingsSurface, provider: SettingsSurfaceProvider } = cr
         const current = view()
 
         if (current.type === "root") {
-          command.trigger("common.goBack")
+          close()
 
           return
         }
@@ -188,9 +202,7 @@ export const { use: useSettingsSurface, provider: SettingsSurfaceProvider } = cr
 
         show(parent)
       },
-      close() {
-        if (open()) command.trigger("common.goBack")
-      },
+      close,
     }
   },
 })

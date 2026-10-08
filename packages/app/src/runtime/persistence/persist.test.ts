@@ -2,16 +2,24 @@ import { describe, expect, test } from "bun:test"
 import type { PersistenceSyncAPI, PersistenceSyncCallback, SyncStorage } from "@solid-primitives/storage"
 import { createRoot } from "solid-js"
 import { createStore } from "solid-js/store"
-import { flushPersisted, persistStore } from "./persist"
+import { awaitPersisted, flushPersisted, persistStore, preparePersisted } from "./persist"
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 type State = { count: number; label: string }
 
-function setup(input: { initial?: string | null; delay?: number; sync?: PersistenceSyncAPI }) {
+function setup(input: {
+  initial?: string | null
+  delay?: number
+  sync?: PersistenceSyncAPI
+  write?: (value: State, serialized: string) => Promise<void>
+  serialize?: (value: State) => string
+}) {
   const writes: string[] = []
+
   return createRoot((dispose) => {
     const [store, setStore] = createStore<State>({ count: 0, label: "" })
+
     const persist = persistStore({
       store,
       setStore,
@@ -23,16 +31,79 @@ function setup(input: { initial?: string | null; delay?: number; sync?: Persiste
         },
         removeItem: () => {},
       } satisfies SyncStorage,
-      serialize: JSON.stringify,
+      serialize: input.serialize ?? JSON.stringify,
       deserialize: JSON.parse,
       sync: input.sync,
       delay: input.delay ?? 10,
+      write: input.write,
     })
+
     return { store, set: persist.setStore, persist, writes, dispose }
   })
 }
 
 describe("persistStore", () => {
+  test("exit barrier waits for async document writes and retries a failed save", async () => {
+    const upload = Promise.withResolvers<void>()
+    const writes: string[] = []
+    let fail = false
+
+    const value = setup({
+      delay: 10_000,
+      write: async (_value, serialized) => {
+        await upload.promise
+
+        if (fail) throw new Error("blob upload failed")
+
+        writes.push(serialized)
+      },
+    })
+
+    const preparation = Promise.withResolvers<void>()
+    const preparing = preparePersisted(preparation.promise.then(() => value.set("label", "last keystroke")))
+    let saved = false
+
+    const barrier = awaitPersisted().then(() => {
+      saved = true
+    })
+
+    await Promise.resolve()
+    expect(saved).toBe(false)
+    expect(writes).toEqual([])
+    preparation.resolve()
+    await preparing
+    expect(saved).toBe(false)
+    upload.resolve()
+    await barrier
+    expect(writes).toEqual([JSON.stringify({ count: 0, label: "last keystroke" })])
+    fail = true
+    value.set("label", "unsaved attachment")
+    await expect(awaitPersisted()).rejects.toThrow("Renderer persistence failed")
+    fail = false
+    await awaitPersisted()
+    expect(writes.at(-1)).toBe(JSON.stringify({ count: 0, label: "unsaved attachment" }))
+    value.dispose()
+  })
+
+  test("a failed serializer continues blocking exit until the same dirty state is saved", async () => {
+    let fail = true
+
+    const value = setup({ serialize: (state) => {
+      if (fail) throw new Error("serialization failed")
+
+      return JSON.stringify(state)
+    } })
+
+    value.set("label", "still pending")
+    await expect(awaitPersisted()).rejects.toThrow("serialization failed")
+    await expect(awaitPersisted()).rejects.toThrow("serialization failed")
+    expect(value.writes).toEqual([])
+    fail = false
+    await awaitPersisted()
+    expect(value.writes).toEqual([JSON.stringify({ count: 0, label: "still pending" })])
+    value.dispose()
+  })
+
   test("marks the store dirty on set and writes once after the delay", async () => {
     const value = setup({})
     value.set("count", 1)
@@ -66,10 +137,12 @@ describe("persistStore", () => {
   test("applies another window's value when clean and ignores it while dirty", () => {
     const listeners: PersistenceSyncCallback[] = []
     const sent: string[] = []
+
     const value = setup({
       delay: 10_000,
       sync: [(subscriber) => listeners.push(subscriber), (_key, next) => sent.push(String(next))],
     })
+
     listeners[0]!({ key: "state", newValue: JSON.stringify({ count: 3, label: "remote" }), timeStamp: 0 })
     expect(value.store).toEqual({ count: 3, label: "remote" })
     value.set("label", "local")
@@ -83,10 +156,12 @@ describe("persistStore", () => {
   test("a remote value arriving during a no-op local set is adopted when the save finds no change", () => {
     const listeners: PersistenceSyncCallback[] = []
     const sent: string[] = []
+
     const value = setup({
       delay: 10_000,
       sync: [(subscriber) => listeners.push(subscriber), (_key, next) => sent.push(String(next))],
     })
+
     value.set("count", 1)
     value.persist.flush()
     // Setting the same value again marks the store dirty without changing it.

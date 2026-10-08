@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { Extension, Store } from "../sdk"
-import { Updater } from "./contract"
+import { Updater, UpdaterPreferences, UpdatePreferences } from "./contract"
 import en from "./i18n/en"
 
 const ReleaseNotes = Schema.Struct({ enabled: Schema.Boolean })
@@ -9,8 +9,9 @@ const Seen = Schema.Struct({ version: Schema.optional(Schema.String) })
 
 export default Extension.define({
   id: "updater",
-  provides: { updater: Updater },
+  provides: { updater: Updater, preferences: UpdaterPreferences },
   stores: {
+    preferences: Store.main(UpdatePreferences, { automatic: true, heartbeat: true }),
     // Whether What's New shows after an update; stored before in the app settings.
     releaseNotes: Store.global(
       ReleaseNotes,

@@ -546,6 +546,10 @@ export interface TitlebarItem {
   readonly icon?: IconName
   /** Shows a spinner and disables the pill. */
   readonly busy?: boolean
+  /** Keeps the label visible, including while busy. Defaults to false. @example true */
+  readonly expanded?: boolean
+  /** Softly pulses until hovered or focused. Change the key for a new notice; omission disables animation. @example "release-2" */
+  readonly attention?: string
   /** Shows the pill pressed (`aria-pressed`). */
   readonly pressed?: boolean
   /** Runs when the user clicks the pill, or the channel badge it toggles. Omit it for an item that only shows. */

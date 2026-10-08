@@ -30,6 +30,11 @@ export class StorageChanged extends Schema.TaggedClass<StorageChanged>()("Storag
   revision: Schema.Number,
 }) {}
 
+export class PersistenceBarrier extends Schema.TaggedClass<PersistenceBarrier>()("PersistenceBarrier", {
+  id: Schema.String,
+  phase: Schema.Literals(["prepare", "cancel"]),
+}) {}
+
 // A main extension's Ipc state for this window, already encoded with the Ipc's schema.
 export class ExtensionState extends Schema.TaggedClass<ExtensionState>()("ExtensionState", {
   ipc: Schema.String,
@@ -63,6 +68,7 @@ export const DesktopEvent = Schema.Union([
   WindowPinchZoomChanged,
   WindowZoomChanged,
   StorageChanged,
+  PersistenceBarrier,
   ExtensionState,
   ExtensionEvent,
   ExtensionAvailable,

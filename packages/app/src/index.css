@@ -313,6 +313,27 @@
     );
   }
 
+  [data-slot="titlebar-update"] > button {
+    max-width: 32px;
+    transition: max-width 180ms ease-out;
+  }
+
+  [data-slot="titlebar-update"]:hover > button,
+  [data-slot="titlebar-update"]:focus-within > button,
+  [data-slot="titlebar-update"][data-expanded] > button {
+    max-width: calc(100vw - 32px);
+  }
+
+  [data-slot="titlebar-update"][data-attention] > button {
+    animation: titlebar-notice-heartbeat 3.6s ease-in-out infinite;
+  }
+
+  @keyframes titlebar-notice-heartbeat {
+    0%, 28%, 100% { box-shadow: 0 0 0 0 transparent; }
+    10%, 21% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--v2-icon-icon-accent) 22%, transparent); }
+    15% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--v2-icon-icon-accent) 8%, transparent); }
+  }
+
   [data-slot="titlebar-update-loader"] {
     display: block;
     flex-shrink: 0;
@@ -327,6 +348,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    [data-slot="titlebar-update"] > button,
+    [data-slot="titlebar-update"][data-attention] > button {
+      animation: none;
+      transition: none;
+    }
     [data-slot="titlebar-update-loader"] {
       animation: none;
     }

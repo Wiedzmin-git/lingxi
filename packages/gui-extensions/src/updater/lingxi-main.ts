@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process"
+import { execFile, spawn } from "node:child_process"
 import path from "node:path"
 import { promisify } from "node:util"
 import { app } from "electron"
@@ -14,7 +14,13 @@ const Offer = Schema.Struct({
   sha256: Schema.NullOr(Schema.String),
 })
 
-const Progress = Schema.Struct({ percent: Schema.Number })
+const Progress = Schema.Struct({
+  percent: Schema.Number,
+  received: Schema.optional(Schema.Number),
+  total: Schema.optional(Schema.Number),
+  bytesPerSecond: Schema.optional(Schema.Number),
+  remainingSeconds: Schema.optional(Schema.NullOr(Schema.Number)),
+})
 
 const setup: MainSetup<typeof definition> = (ctx) => {
   let state: UpdaterState = { status: "idle" }
@@ -42,6 +48,8 @@ const setup: MainSetup<typeof definition> = (ctx) => {
   }
 
   const run = (selection?: UpdateSelection): Promise<UpdaterState> => {
+    if (state.status === "installing") return Promise.reject(new Error(ctx.t("lingxi.selectionChanged")))
+
     if (pending && selection) return Promise.reject(new Error(ctx.t("lingxi.selectionChanged")))
 
     if (pending) return pending
@@ -69,7 +77,8 @@ const setup: MainSetup<typeof definition> = (ctx) => {
       windowsHide: true,
       signal: ctx.scope.signal,
       timeout: selection ? 16 * 60_000 : 70_000,
-      maxBuffer: 65_536,
+      // Up to sixteen minutes of one-second progress frames are retained by execFile.
+      maxBuffer: 1_048_576,
     })
 
     let progress = ""
@@ -88,7 +97,14 @@ const setup: MainSetup<typeof definition> = (ctx) => {
         if (!Exit.isSuccess(result) || state.status !== "downloading") continue
 
         if (!Number.isInteger(result.value.percent) || result.value.percent < 0 || result.value.percent > 100) continue
-        update({ ...state, percent: result.value.percent })
+        const frame = result.value
+
+        if ([frame.received, frame.total, frame.bytesPerSecond, frame.remainingSeconds].some(
+          (value) => value != null && (!Number.isFinite(value) || value < 0),
+        )) continue
+
+        if (frame.received !== undefined && frame.total !== undefined && frame.received > frame.total) continue
+        update({ ...state, ...frame, remainingSeconds: frame.remainingSeconds ?? undefined })
       }
     })
     pending = operation
@@ -100,6 +116,8 @@ const setup: MainSetup<typeof definition> = (ctx) => {
 
         if (!offer.version || !offer.sha256 || !/^[a-f0-9]{64}$/.test(offer.sha256))
           throw new Error("Invalid update offer")
+
+        if (offer.status === "staged" && offer.sha256 === digest) return update({ status: "lingxi-bootstrap" })
 
         return update({
           status: offer.status === "available" ? "lingxi-available" : "lingxi-staged",
@@ -123,12 +141,71 @@ const setup: MainSetup<typeof definition> = (ctx) => {
       throw new Error(ctx.t("lingxi.selectionChanged"))
     },
     stage: (selection) => run(selection),
+    restart: async (selection) => {
+      const staged = state
+
+      if (!managed || pending || staged.status !== "lingxi-staged" || staged.sha256 !== selection.sha256 || staged.channel !== selection.channel)
+        throw new Error(ctx.t("lingxi.selectionChanged"))
+      update({ status: "installing", version: staged.version })
+
+      // Validate and arm the exact successor before disposing any main extension.
+      const child = spawn(helper, ["desktop-restart", root, selection.sha256, selection.channel], {
+        windowsHide: true,
+        detached: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+
+      const cancel = () => child.kill()
+      ctx.scope.signal.addEventListener("abort", cancel, { once: true })
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+              const deadline = setTimeout(() => reject(new Error(ctx.t("lingxi.restartFailed"))), 20_000)
+              let text = ""
+
+              child.once("error", reject)
+              child.once("exit", () => reject(new Error(ctx.t("lingxi.restartFailed"))))
+              child.stdout.setEncoding("utf8")
+              child.stdout.on("data", (chunk: string) => {
+                text += chunk
+
+                if (text.trim() !== "ready") return
+                clearTimeout(deadline)
+                resolve()
+              })
+              child.once("exit", () => clearTimeout(deadline))
+              child.once("error", () => clearTimeout(deadline))
+        })
+
+        if (ctx.scope.signal.aborted || child.exitCode !== null) throw new Error(ctx.t("lingxi.restartFailed"))
+
+        await ctx.lifecycle.restart(() => {
+          if (child.exitCode !== null) throw new Error(ctx.t("lingxi.restartFailed"))
+          ctx.scope.signal.removeEventListener("abort", cancel)
+          child.stdout.destroy()
+          child.unref()
+          // The lifecycle has disposed other extensions and synchronously flushed
+          // storage immediately before this handoff. Avoid a second cancellable quit.
+          app.exit(0)
+        }, { keep: ctx.scope })
+      } catch {
+        cancel()
+        update(staged)
+        throw new Error(ctx.t("lingxi.restartFailed"))
+      } finally {
+        ctx.scope.signal.removeEventListener("abort", cancel)
+      }
+    },
   })
 
   // The main owner checks once after startup and periodically while open; windows
   // share one check and receive the native IPC state, never credentials.
-  const first = setTimeout(() => void run(), 10_000)
-  const interval = setInterval(() => void run(), 30 * 60_000)
+  const checkAutomatically = () => {
+    if (ctx.stores.preferences.value.automatic && state.status !== "lingxi-staged" && state.status !== "installing") void run()
+  }
+
+  const first = setTimeout(checkAutomatically, 10_000)
+  const interval = setInterval(checkAutomatically, 30 * 60_000)
   ctx.scope.addFinalizer(() => {
     clearTimeout(first)
     clearInterval(interval)

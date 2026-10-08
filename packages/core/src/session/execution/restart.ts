@@ -12,9 +12,7 @@ import { SessionStore } from "../store.js"
 import { ShellResult } from "../../shell/result.js"
 import { SubagentCompletion } from "../subagent-completion.js"
 import { SubagentJob } from "../subagent-job.js"
-
-const CONTINUE_AFTER_SERVER_RESTART =
-  "The server restarted while you were working. Continue from where you left off without repeating completed work."
+import { RESTART_NOTICE } from "./restart-notice.js"
 
 const RESUME_EXHAUSTED = {
   type: "aborted",
@@ -92,7 +90,7 @@ export const layer = (options?: Options) =>
         }
         yield* bus.publish(SessionEvent.Synthetic, {
           sessionID,
-          text: CONTINUE_AFTER_SERVER_RESTART,
+          text: RESTART_NOTICE,
           description: "Continuing after restart",
           metadata: { notice: "restart" },
         })

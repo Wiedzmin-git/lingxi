@@ -1,6 +1,7 @@
 export * as Extensions from "./index"
 
 import { app } from "electron"
+import { prepareRendererPersistence } from "../lifecycle/renderer-persistence"
 import { Context, Effect, Layer } from "effect"
 import type { ExtensionEndpoint } from "../../shared/ipc-rpc/extensions"
 import { ApplicationLifecycle } from "../lifecycle"
@@ -51,16 +52,23 @@ export const layer = Layer.effect(
 
     // Disposes every extension but the caller (the host keeps it), then hands off (e.g. quitAndInstall) or relaunches.
     const restart = async (handoff?: () => void | Promise<void>) => {
+      const barrier = await prepareRendererPersistence()
       setAppQuitting()
       await runPromise(lifecycle.prepareToRestart)
         .then(() => {
+          barrier.verify()
+          // No renderer write admitted while preparation settled may escape the
+          // final barrier immediately before a synchronous exit handoff.
+          storage.flush()
+
           if (handoff) return handoff()
 
           app.relaunch()
-          app.quit()
+          app.exit(0)
         })
-        .catch((cause: unknown) => {
+        .catch(async (cause: unknown) => {
           lifecycle.cancelRestart()
+          await Promise.resolve(current.host?.resume()).finally(barrier.release)
           throw cause
         })
     }

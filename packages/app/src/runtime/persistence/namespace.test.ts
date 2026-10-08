@@ -14,20 +14,28 @@ function host(initial: Record<string, Record<string, string>> = {}) {
   let revision = 0
   let fail: (insert: Record<string, string>) => boolean = () => false
   let gate: Promise<void> | undefined
+
   const driver: NamespaceDriver = {
     items: async (name) => {
       calls.push({ kind: "items", name })
+
       return { items: Object.fromEntries(data.get(name) ?? []), revision }
     },
     update: async (name, insert, remove) => {
       calls.push({ kind: "update", name, insert, remove })
       await gate
+
       if (fail(insert)) throw new Error("disk full")
+
       const items = data.get(name) ?? new Map()
+
       for (const [key, value] of Object.entries(insert)) items.set(key, value)
+
       for (const key of remove) items.delete(key)
+
       data.set(name, items)
       events.push({ name, insert, remove, revision: ++revision })
+
       return revision
     },
     clear: async (name) => {
@@ -35,6 +43,7 @@ function host(initial: Record<string, Record<string, string>> = {}) {
       data.delete(name)
     },
   }
+
   return {
     driver,
     data,
@@ -42,7 +51,7 @@ function host(initial: Record<string, Record<string, string>> = {}) {
     events,
     updates: () => calls.filter((call) => call.kind === "update"),
     setFail: (value: boolean | ((insert: Record<string, string>) => boolean)) =>
-      (fail = typeof value === "boolean" ? () => value : value),
+      (fail = value === true || value === false ? () => value : value),
     setGate: (value: Promise<void> | undefined) => (gate = value),
     deliver: (target: NamespaceStorage, index: number) => {
       const event = events[index]!
@@ -102,9 +111,10 @@ describe("namespace storage", () => {
     void storage.setItem("recent", "{}")
     await storage.flush()
     expect(h.data.get("w")).toBeUndefined()
+    await expect(storage.flush({ strict: true })).rejects.toThrow("unaccepted changes")
     h.setFail(false)
     void storage.setItem("tabs", "[2]")
-    await storage.flush()
+    await storage.flush({ strict: true })
     expect(Object.fromEntries(h.data.get("w")!)).toEqual({ tabs: "[2]", recent: "{}" })
   })
 
@@ -126,11 +136,13 @@ describe("namespace storage", () => {
   test("a pending load or an external change cannot overwrite a value that is in flight", async () => {
     const loaded = Promise.withResolvers<{ items: Record<string, string>; revision: number }>()
     const accepted = Promise.withResolvers<number>()
+
     const driver: NamespaceDriver = {
       items: () => loaded.promise,
       update: () => accepted.promise,
       clear: async () => undefined,
     }
+
     const storage = createNamespaceStorage(driver, "g", { delay: 10_000 })
     const read = storage.getItem("model")
     void storage.setItem("model", "local")

@@ -1,12 +1,24 @@
 import { dialog } from "electron"
 import { Effect, Exit, Scope } from "effect"
 import { MenubarItem, type MainSetup } from "../sdk/main"
-import { Updater } from "./contract"
+import { Updater, UpdaterPreferences } from "./contract"
 import type definition from "./index"
 import { logContext } from "./log"
 import { make } from "./machine"
 
 const setup: MainSetup<typeof definition> = async (ctx) => {
+  const preferences = ctx.provide(UpdaterPreferences, {
+    state: () => ctx.stores.preferences.value,
+    configure: (input) => {
+      ctx.stores.preferences.update((draft) => {
+        if (input.automatic !== undefined) draft.automatic = input.automatic
+
+        if (input.heartbeat !== undefined) draft.heartbeat = input.heartbeat
+      })
+      preferences.changed()
+    },
+  })
+
   if (ctx.build.version.includes("-lingxi.")) {
     const module = await import("./lingxi-main")
 
@@ -63,6 +75,9 @@ const setup: MainSetup<typeof definition> = async (ctx) => {
     check: () => runPromise(updater.check),
     install: () => runPromise(updater.install),
     stage: async () => {
+      throw new Error(ctx.t("lingxi.unmanaged"))
+    },
+    restart: async () => {
       throw new Error(ctx.t("lingxi.unmanaged"))
     },
   })

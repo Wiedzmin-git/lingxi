@@ -219,6 +219,30 @@ function check(w: World) {
 }
 
 describe("extension lifecycle contracts", () => {
+  test("cancelled restart reopens disposed providers without duplicating the kept owner", async () => {
+    const w = world()
+    w.revise("a")
+    w.revise("b")
+    await Promise.all([w.lifecycle.activate("a"), w.lifecycle.activate("b")])
+    const owner = w.live("a")[0]
+    const disposed = w.live("b")[0]
+
+    await expect(w.lifecycle.restart(owner.instance.scope, async () => {
+      await w.lifecycle.dispose()
+      throw new Error("final durability barrier failed")
+    })).rejects.toThrow("final durability barrier failed")
+    expect(w.live("b")).toHaveLength(0)
+    w.lifecycle.cancelQuit()
+    await Promise.all([w.lifecycle.activate("a"), w.lifecycle.activate("b")])
+    expect(w.live("a")).toEqual([owner])
+    expect(w.live("b")).toHaveLength(1)
+    expect(w.live("b")[0]).not.toBe(disposed)
+    w.open()
+    check(w)
+    expect([...w.contributions].filter((entry) => entry.kind === "embed")).toHaveLength(2)
+    await w.lifecycle.dispose()
+  })
+
   test.each([
     {
       name: "reload",

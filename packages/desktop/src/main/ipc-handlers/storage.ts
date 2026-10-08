@@ -6,11 +6,13 @@ import { emitIpcEvent } from "../ipc-events"
 import { IpcPortHandoff } from "../ipc-transport"
 import { DesktopStorage } from "../storage"
 import { sender } from "./context"
+import { acknowledgePersistenceBarrier } from "../lifecycle/renderer-persistence"
 
 export const storageHandlers = StorageRpcs.toLayer(
   Effect.gen(function* () {
     const storage = yield* DesktopStorage.Service
     const handoff = yield* IpcPortHandoff
+
     return StorageRpcs.of({
       StorageItems: ({ name }) => Effect.sync(() => storage.state.items(name)),
       StorageUpdate: ({ name, insert, remove }, context) =>
@@ -19,12 +21,16 @@ export const storageHandlers = StorageRpcs.toLayer(
           // Other windows hold their own copy of this namespace; tell them what moved.
           const origin = sender(handoff, context)
           const event = new StorageChanged({ name, insert, remove, revision })
+
           for (const win of BrowserWindow.getAllWindows()) {
             if (win.webContents !== origin) emitIpcEvent(win.webContents, event)
           }
+
           return revision
         }),
       StorageClear: ({ name }) => Effect.sync(() => storage.state.clear(name)),
+      StorageBarrierReady: ({ id, success }, context) =>
+        Effect.sync(() => acknowledgePersistenceBarrier(sender(handoff, context).id, id, success)),
       DraftsGet: ({ key }) => Effect.sync(() => storage.drafts.get(key)),
       DraftsSet: ({ key, value, strict }) => Effect.sync(() => storage.drafts.set(key, value, strict)),
       DraftsDelete: ({ key }) => Effect.sync(() => void storage.drafts.set(key, null)),

@@ -28,6 +28,8 @@ export type ElectronAPI = {
   storeItems(name: string): Promise<{ items: Record<string, string>; revision: number }>
   storeUpdate(name: string, insert: Record<string, string>, remove: string[]): Promise<number>
   storeClear(name: string): Promise<void>
+  onPersistenceBarrier(cb: (id: string, phase: "prepare" | "cancel") => void): () => void
+  persistenceBarrierReady(id: string, success: boolean): Promise<void>
   onStoreChanged(
     cb: (name: string, insert: Record<string, string>, remove: string[], revision: number) => void,
   ): () => void

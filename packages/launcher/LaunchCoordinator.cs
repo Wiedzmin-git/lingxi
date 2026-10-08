@@ -8,7 +8,7 @@ namespace Lingxi.Launcher;
 
 public sealed class LaunchCoordinator(InstallationStore installation, BundleStore bundles)
 {
-    public async Task<string> Launch(CancellationToken cancellationToken)
+    public async Task<string> Launch(CancellationToken cancellationToken, string? expectedDigest = null, bool resumeActive = false)
     {
         using var ownership = installation.Lock("launch");
         var state = installation.Read();
@@ -21,6 +21,8 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             throw Block("Previous startup process ownership is unknown; automatic recovery is blocked");
 
         var selected = state.Candidate ?? state.Current ?? throw new InvalidOperationException("No bundle is staged");
+        if (expectedDigest is not null && selected.Sha256 != expectedDigest)
+            throw new InvalidOperationException("Restart selection changed before launch admission");
         var episode = state.Episode is { Phase: "primary" or "fallback" } active ? active :
             new RecoveryEpisode(Guid.NewGuid().ToString("N"), selected, state.Candidate is null ? state.Previous : state.Current, "new");
         var fallbackAttempt = episode.Phase == "primary";
@@ -30,11 +32,11 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             await ServiceUpgradeRecovery.Retire(installation, state.Profile, interrupted);
 
         Process process;
-        try { process = await Start(selected, episode, fallbackAttempt, state.Profile, state.Channel, cancellationToken); }
+        try { process = await Start(selected, episode, fallbackAttempt, state.Profile, state.Channel, cancellationToken, resumeActive); }
         catch (StartupFailure) when (!fallbackAttempt)
         {
             selected = Fallback(episode);
-            try { process = await Start(selected, episode, true, state.Profile, state.Channel, cancellationToken); }
+            try { process = await Start(selected, episode, true, state.Profile, state.Channel, cancellationToken, resumeActive); }
             catch (StartupFailure) { throw Block("Candidate and compatible fallback did not become ready"); }
         }
         catch (StartupFailure) { throw Block("The compatible fallback did not become ready"); }
@@ -69,7 +71,7 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
     }
 
     private async Task<Process> Start(Slot selected, RecoveryEpisode episode, bool fallback,
-        ProfileSelection profile, string channel, CancellationToken cancellationToken)
+        ProfileSelection profile, string channel, CancellationToken cancellationToken, bool resumeActive)
     {
         Process? process = null;
         var accepted = false;
@@ -108,10 +110,15 @@ public sealed class LaunchCoordinator(InstallationStore installation, BundleStor
             admitted = attempt;
             SupervisorBootstrap.Record(installation, attempt, profile);
             var previousBundle = installation.Read().Current;
-            var transition = BackendTransition.Prepare(installation, bundles, profile, attempt, previousBundle, fallback ? episode.Primary : null);
+            var transition = BackendTransition.Prepare(installation, bundles, profile, attempt, previousBundle, fallback ? episode.Primary : null, resumeActive);
             BackendTransition.VerifyCache(profile, selected, bundles);
             var start = new ProcessStartInfo(Wire.Within(bundles.DirectoryFor(selected.Sha256), manifest.Entrypoint))
-            { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = bundles.DirectoryFor(selected.Sha256) };
+            // Chromium may emit native startup diagnostics before Electron's JS entrypoint.
+            // Keep such files in the profile so the admitted bundle stays immutable.
+            { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = profile.OwnershipDirectory };
+            // This is a new browser generation, not a child of the previous crash handler.
+            // Early renderers otherwise inherit its dead pipe before JS starts the new handler.
+            start.Environment.Remove("CHROME_CRASHPAD_PIPE_NAME");
             start.Environment["LINGXI_PROFILE_BINDING"] = profile.BindingPath;
             start.Environment["LINGXI_PROFILE_ID"] = profile.Id;
             start.Environment["LINGXI_PROFILE_DIGEST"] = profile.BindingSha256;
